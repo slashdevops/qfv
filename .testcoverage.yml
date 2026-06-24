@@ -9,7 +9,7 @@ profile: coverage.txt
 
 # (optional; but recommended to set)
 # When specified reported file paths will not contain local prefix in the output.
-local-prefix: "github.com/p2p-b2b/qfv"
+local-prefix: "github.com/slashdevops/qfv"
 
 # Holds coverage thresholds percentages, values should be in range [0-100].
 threshold:

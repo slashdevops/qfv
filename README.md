@@ -15,7 +15,7 @@ The library ensures that only allowed fields are used in these expressions, help
 ## Installation
 
 ```bash
-go get github.com/p2p-b2b/qfv@latest
+go get github.com/slashdevops/qfv@latest
 ```
 
 ## Usage
@@ -29,7 +29,7 @@ import (
   "fmt"
   "log"
 
-  qfv "github.com/p2p-b2b/qfv"
+  qfv "github.com/slashdevops/qfv"
 )
 
 func main() {

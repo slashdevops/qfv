@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	qfv "github.com/p2p-b2b/qfv"
+	qfv "github.com/slashdevops/qfv"
 )
 
 func TestParsers(t *testing.T) {
