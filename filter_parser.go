@@ -197,6 +197,21 @@ func (p *filterParseState) parseComparison() Node {
 			p.addError(&QFVFilterError{Field: field.Name, Message: "field not allowed"})
 		}
 
+		// Non-standard PostgreSQL shorthands: `field ISNULL` and `field NOTNULL`.
+		// These are single identifier tokens (unlike the `IS [NOT] NULL` keywords).
+		if p.currentToken.Type == TokenIdentifier {
+			switch strings.ToUpper(p.currentToken.Value) {
+			case "ISNULL":
+				pos := p.currentToken.Pos
+				p.nextToken()
+				return &IsNullNode{baseNode: baseNode{pos: pos}, Field: field, IsNot: false}
+			case "NOTNULL":
+				pos := p.currentToken.Pos
+				p.nextToken()
+				return &IsNullNode{baseNode: baseNode{pos: pos}, Field: field, IsNot: true}
+			}
+		}
+
 		// Handle different operators
 		switch p.currentToken.Type {
 		case TokenOperatorEqual, TokenOperatorNotEqual, TokenOperatorNotEqualAlias,
@@ -204,8 +219,17 @@ func (p *filterParseState) parseComparison() Node {
 			TokenOperatorGreaterThan, TokenOperatorGreaterThanOrEqualTo:
 			return p.parseComparisonOperator(field)
 		case TokenOperatorLike:
-			p.nextToken() // Consume LIKE
-			return p.parseLikeOperator(field, false)
+			p.nextToken() // Consume LIKE (or ~~)
+			return p.parseLikeOperator(field, TokenOperatorLike)
+		case TokenOperatorILike:
+			p.nextToken() // Consume ILIKE (or ~~*)
+			return p.parseLikeOperator(field, TokenOperatorILike)
+		case TokenOperatorNotLike:
+			p.nextToken() // Consume !~~ (operator form of NOT LIKE)
+			return p.parseLikeOperator(field, TokenOperatorNotLike)
+		case TokenOperatorNotILike:
+			p.nextToken() // Consume !~~* (operator form of NOT ILIKE)
+			return p.parseLikeOperator(field, TokenOperatorNotILike)
 		case TokenOperatorIn:
 			p.nextToken() // Consume IN
 			return p.parseInOperator(field, false)
@@ -214,7 +238,7 @@ func (p *filterParseState) parseComparison() Node {
 			return p.parseBetweenOperator(field, false)
 		case TokenOperatorIsNull:
 			p.nextToken() // Consume IS
-			return p.parseIsNullOperator(field)
+			return p.parseIsPredicate(field)
 		case TokenOperatorDistinct:
 			p.nextToken() // Consume DISTINCT
 			return p.parseDistinctOperator(field, false)
@@ -258,7 +282,10 @@ func (p *filterParseState) parseComparison() Node {
 				return p.parseBetweenOperator(field, true)
 			case TokenOperatorLike:
 				p.nextToken() // Consume LIKE
-				return p.parseLikeOperator(field, true)
+				return p.parseLikeOperator(field, TokenOperatorNotLike)
+			case TokenOperatorILike:
+				p.nextToken() // Consume ILIKE
+				return p.parseLikeOperator(field, TokenOperatorNotILike)
 			case TokenOperatorSimilarTo:
 				p.nextToken() // Consume SIMILAR
 				return p.parseSimilarToOperator(field, true)
@@ -312,15 +339,13 @@ func (p *filterParseState) parseSimilarToOperator(field Node, isNot bool) Node {
 	}
 }
 
-// parseLikeOperator parses LIKE operator
-// Expects the current token to be the pattern after LIKE was consumed.
-func (p *filterParseState) parseLikeOperator(field Node, isNot bool) Node {
-	pos := p.lexer.Current().Pos // Use position of LIKE token (already consumed)
+// parseLikeOperator parses a LIKE/ILIKE/NOT LIKE/NOT ILIKE operator.
+// Expects the current token to be the pattern after the operator was consumed.
+// operator is one of TokenOperatorLike, TokenOperatorILike, TokenOperatorNotLike,
+// or TokenOperatorNotILike.
+func (p *filterParseState) parseLikeOperator(field Node, operator TokenType) Node {
+	pos := p.lexer.Current().Pos // Use position of the operator token (already consumed)
 	pattern := p.parsePrimary()
-	operator := TokenOperatorLike
-	if isNot {
-		operator = TokenOperatorNotLike
-	}
 	return &BinaryOperatorNode{
 		baseNode: baseNode{pos: pos},
 		Left:     field,
@@ -372,6 +397,19 @@ func (p *filterParseState) parseInOperator(field Node, isNot bool) Node {
 // Expects the current token to be the lower bound after BETWEEN was consumed.
 func (p *filterParseState) parseBetweenOperator(field Node, isNot bool) Node {
 	pos := p.lexer.Current().Pos // Use position of BETWEEN token (already consumed)
+
+	// Optional SYMMETRIC / ASYMMETRIC modifier (ASYMMETRIC is the default).
+	isSymmetric := false
+	if p.currentToken.Type == TokenIdentifier {
+		switch strings.ToUpper(p.currentToken.Value) {
+		case "SYMMETRIC":
+			isSymmetric = true
+			p.nextToken()
+		case "ASYMMETRIC":
+			p.nextToken()
+		}
+	}
+
 	lower := p.parsePrimary()
 
 	if !p.expect(TokenOperatorAnd) {
@@ -382,17 +420,23 @@ func (p *filterParseState) parseBetweenOperator(field Node, isNot bool) Node {
 	upper := p.parsePrimary()
 
 	return &BetweenNode{
-		baseNode: baseNode{pos: pos},
-		Field:    field,
-		Lower:    lower,
-		Upper:    upper,
-		IsNot:    isNot,
+		baseNode:    baseNode{pos: pos},
+		Field:       field,
+		Lower:       lower,
+		Upper:       upper,
+		IsNot:       isNot,
+		IsSymmetric: isSymmetric,
 	}
 }
 
-// parseIsNullOperator parses IS [NOT] NULL operator
-// Expects the current token to be NOT or NULL after IS was consumed.
-func (p *filterParseState) parseIsNullOperator(field Node) Node {
+// parseIsPredicate parses the family of IS predicates after IS was consumed:
+//
+//	IS [NOT] NULL
+//	IS [NOT] TRUE | FALSE | UNKNOWN
+//	IS [NOT] DISTINCT FROM <value>
+//
+// Expects the current token to be NOT or the predicate keyword.
+func (p *filterParseState) parseIsPredicate(field Node) Node {
 	pos := p.lexer.Current().Pos // Use position of IS token (already consumed)
 	isNot := false
 	if p.currentToken.Type == TokenOperatorNot {
@@ -400,20 +444,34 @@ func (p *filterParseState) parseIsNullOperator(field Node) Node {
 		p.nextToken() // Consume NOT
 	}
 
-	// Check for NULL
-	if p.currentToken.Type == TokenIdentifier && strings.ToUpper(p.currentToken.Value) == "NULL" {
-		p.nextToken() // Consume NULL
-		return &IsNullNode{
-			baseNode: baseNode{pos: pos},
-			Field:    field,
-			IsNot:    isNot,
+	switch {
+	case p.currentToken.Type == TokenOperatorDistinct:
+		// IS [NOT] DISTINCT FROM <value>
+		p.nextToken() // Consume DISTINCT
+		return p.parseDistinctOperator(field, isNot)
+
+	case p.currentToken.Type == TokenBoolean:
+		// IS [NOT] TRUE | FALSE (TRUE/YES and FALSE/NO are lexed as booleans)
+		truth := BooleanTrue
+		if v := strings.ToUpper(p.currentToken.Value); v == "FALSE" || v == "NO" {
+			truth = BooleanFalse
 		}
+		p.nextToken() // Consume TRUE/FALSE
+		return &BooleanTestNode{baseNode: baseNode{pos: pos}, Field: field, Value: truth, IsNot: isNot}
+
+	case p.currentToken.Type == TokenIdentifier && strings.ToUpper(p.currentToken.Value) == "NULL":
+		p.nextToken() // Consume NULL
+		return &IsNullNode{baseNode: baseNode{pos: pos}, Field: field, IsNot: isNot}
+
+	case p.currentToken.Type == TokenIdentifier && strings.ToUpper(p.currentToken.Value) == "UNKNOWN":
+		p.nextToken() // Consume UNKNOWN
+		return &BooleanTestNode{baseNode: baseNode{pos: pos}, Field: field, Value: BooleanUnknown, IsNot: isNot}
 	}
 
 	if isNot {
-		p.addError(&QFVFilterError{Message: "expected NULL after IS NOT"})
+		p.addError(&QFVFilterError{Message: "expected NULL, TRUE, FALSE, UNKNOWN, or DISTINCT FROM after IS NOT"})
 	} else {
-		p.addError(&QFVFilterError{Message: "expected NULL or NOT NULL after IS"})
+		p.addError(&QFVFilterError{Message: "expected NULL, TRUE, FALSE, UNKNOWN, or DISTINCT FROM after IS"})
 	}
 	return field // Return field on error
 }

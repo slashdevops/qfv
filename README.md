@@ -1,5 +1,7 @@
 # Query Filters Validator (QFV)
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/slashdevops/qfv.svg)](https://pkg.go.dev/github.com/slashdevops/qfv)
+
 A Go library for parsing and validating query expressions commonly used in REST APIs and database queries. This library provides robust parsing and validation for fields selection, filtering, and sorting operations.
 
 ## Overview
@@ -113,18 +115,28 @@ Parse and validate complex filter expressions like:
 first_name = 'John' AND last_name = 'Doe' OR email = 'example@example.com'
 ```
 
-The filter parser supports:
+The filter parser supports a PostgreSQL-flavored grammar (see
+[PostgreSQL 18: Comparison Functions and Operators](https://www.postgresql.org/docs/18/functions-comparison.html)
+and [Pattern Matching](https://www.postgresql.org/docs/18/functions-matching.html)):
 
-- **Logical operators**: AND, OR, NOT
-- **Comparison operators**: =, <>, !=, <, <=, >, >=
-- **Special operators**: LIKE, IN, BETWEEN, IS NULL, IS NOT NULL, DISTINCT, SIMILAR TO
-- **Regex operators**:
+- **Logical operators**: `AND`, `OR`, `NOT`
+- **Comparison operators**: `=`, `<>`, `!=`, `<`, `<=`, `>`, `>=`
+- **Range predicates**: `BETWEEN`, `NOT BETWEEN`, `BETWEEN SYMMETRIC`, `NOT BETWEEN SYMMETRIC` (and the explicit `ASYMMETRIC` default)
+- **Set membership**: `IN`, `NOT IN`
+- **Null tests**: `IS NULL`, `IS NOT NULL`, plus the non-standard `ISNULL` / `NOTNULL` shorthands
+- **Boolean tests**: `IS TRUE`, `IS NOT TRUE`, `IS FALSE`, `IS NOT FALSE`, `IS UNKNOWN`, `IS NOT UNKNOWN`
+- **Null-safe comparison**: `IS DISTINCT FROM`, `IS NOT DISTINCT FROM`
+- **Pattern matching**:
+  - `LIKE`, `NOT LIKE` (and operator forms `~~`, `!~~`)
+  - `ILIKE`, `NOT ILIKE` — case-insensitive (and operator forms `~~*`, `!~~*`)
+  - `SIMILAR TO`, `NOT SIMILAR TO` — SQL-standard regex
+- **POSIX regex operators**:
   - `~`: Case-sensitive regex match
   - `!~`: Case-sensitive regex non-match
   - `~*`: Case-insensitive regex match
   - `!~*`: Case-insensitive regex non-match
 - **Grouping** with parentheses
-- **Literals**: strings, integers, floats, booleans
+- **Literals**: strings (single-quoted, `''` escapes a quote), integers, floats, booleans (`TRUE`/`FALSE`/`YES`/`NO`)
 
 The parser ensures that:
 
@@ -151,14 +163,31 @@ The parser ensures that:
 "age <> 30"  // Not equal
 "age != 30"  // Not equal (alternative)
 
-// Special operators
+// Pattern matching
 "first_name LIKE 'J%'"
+"first_name NOT LIKE 'J%'"
+"first_name ILIKE 'j%'"       // case-insensitive
+"first_name NOT ILIKE 'j%'"
+"name SIMILAR TO 'J%n'"       // SQL standard regex
+"name NOT SIMILAR TO 'J%n'"
+
+// Set membership & ranges
 "status IN ('active', 'pending')"
+"status NOT IN ('archived')"
 "age BETWEEN 20 AND 30"
+"age NOT BETWEEN 20 AND 30"
+"age BETWEEN SYMMETRIC 30 AND 20" // endpoints auto-sorted
+
+// Null / boolean / null-safe tests
 "middle_name IS NULL"
 "middle_name IS NOT NULL"
-"name SIMILAR TO 'J%n'" // SQL standard regex
-"name NOT SIMILAR TO 'J%n'"
+"middle_name ISNULL"              // shorthand
+"middle_name NOTNULL"            // shorthand
+"active IS TRUE"
+"active IS NOT FALSE"
+"active IS UNKNOWN"
+"age IS DISTINCT FROM 30"        // null-safe !=
+"age IS NOT DISTINCT FROM 30"    // null-safe =
 "email ~ '^[^@]+@[^@]+\.[^@]+$'" // Case-sensitive regex match
 "email !~ '^[^@]+@[^@]+\.[^@]+$'" // Case-sensitive regex non-match
 "email ~* '(?i)^admin@'" // Case-insensitive regex match (using Go regex flag)
@@ -272,3 +301,31 @@ Code that only checked `err != nil` is unaffected.
 A single `*FilterParser` (like `*SortParser` and `*FieldsParser`) can now be
 created once and shared across goroutines; per-request state is no longer stored
 on the parser. No API change — this simply removes a data race.
+
+### 6. New PostgreSQL 18 predicates and operators (additive)
+
+The filter grammar gained the following predicates, aligned with
+[PostgreSQL 18](https://www.postgresql.org/docs/18/functions-comparison.html).
+These are additive — existing queries keep parsing — with the AST notes below:
+
+| Predicate / operator | AST node |
+| --- | --- |
+| `ILIKE`, `NOT ILIKE` (and `~~`, `~~*`, `!~~`, `!~~*`) | `BinaryOperatorNode` with `Operator` `ILIKE` / `NOT ILIKE` (or `LIKE` / `NOT LIKE` for the plain forms) |
+| `IS [NOT] TRUE`, `IS [NOT] FALSE`, `IS [NOT] UNKNOWN` | new `BooleanTestNode{Field, Value, IsNot}` (`Value` is `BooleanTrue`/`BooleanFalse`/`BooleanUnknown`) |
+| `IS [NOT] DISTINCT FROM <value>` | `DistinctNode` (now reachable via the standard `IS` form) |
+| `BETWEEN [NOT] SYMMETRIC` (and explicit `ASYMMETRIC`) | `BetweenNode` gained `IsSymmetric bool` |
+| `ISNULL`, `NOTNULL` shorthands | `IsNullNode` (with `IsNot=true` for `NOTNULL`) |
+
+Two node changes accompany these:
+
+- `DistinctNode` gained a `Value Node` field (the right-hand side of
+  `IS [NOT] DISTINCT FROM`), and its `String()` now renders the canonical
+  `field IS [NOT] DISTINCT FROM value` form (previously `field DISTINCT FROM value`).
+- `BetweenNode` gained an `IsSymmetric bool` field; `String()` appends
+  `SYMMETRIC` when set.
+
+> Note on `ILIKE`/regex operators: the parser validates that the right-hand side
+> is a **string literal**, but it does not compile the pattern. If you evaluate
+> the pattern with Go's `regexp`, validate/compile it yourself. Single-quoted
+> string literals treat backslashes literally (only `''` is an escape), so a
+> regex like `'^\d+$'` reaches you with the backslash intact.

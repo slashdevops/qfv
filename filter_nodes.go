@@ -28,6 +28,7 @@ const (
 	NodeTypeSimilarTo      NodeType = "SIMILAR_TO"      // (field, pattern) -> name SIMILAR TO "pattern"
 	NodeTypeNotSimilarTo   NodeType = "NOT_SIMILAR_TO"  // (field, pattern) -> name NOT SIMILAR TO "pattern"
 	NodeTypeRegexMatch     NodeType = "REGEX_MATCH"     // (field, pattern, is_not, is_case_insensitive) -> name ~ 'pattern'
+	NodeTypeBooleanTest    NodeType = "BOOLEAN_TEST"    // (field, test, is_not) -> active IS TRUE, active IS NOT FALSE
 
 	NodeTypeSort      NodeType = "SORT"       // (field, direction) -> name ASC, age DESC
 	NodeTypeSortField NodeType = "SORT_FIELD" // (field, direction) -> name ASC, age DESC
@@ -232,24 +233,53 @@ func (n *DistinctNode) Type() NodeType {
 	return NodeTypeDistinct
 }
 func (n *DistinctNode) String() string {
-	op := "DISTINCT"
+	op := "IS DISTINCT FROM"
 	if n.IsNot {
-		op = "NOT DISTINCT"
+		op = "IS NOT DISTINCT FROM"
 	}
 	if n.Value != nil {
-		return fmt.Sprintf("%s %s FROM %s", n.Field.String(), op, n.Value.String())
+		return fmt.Sprintf("%s %s %s", n.Field.String(), op, n.Value.String())
 	}
-	return fmt.Sprintf("%s %s", n.Field.String(), op)
+	// Value omitted (not expected in normal parses); drop the trailing FROM.
+	return fmt.Sprintf("%s %s", n.Field.String(), strings.TrimSuffix(op, " FROM"))
 }
 func (n *DistinctNode) Pos() scanner.Position { return n.pos }
+
+// BooleanTruthValue is the truth value tested by a BooleanTestNode.
+type BooleanTruthValue string
+
+const (
+	BooleanTrue    BooleanTruthValue = "TRUE"
+	BooleanFalse   BooleanTruthValue = "FALSE"
+	BooleanUnknown BooleanTruthValue = "UNKNOWN"
+)
+
+// BooleanTestNode represents an IS [NOT] TRUE/FALSE/UNKNOWN expression
+// (e.g., active IS TRUE, active IS NOT FALSE).
+type BooleanTestNode struct {
+	baseNode
+	Field Node
+	Value BooleanTruthValue // TRUE, FALSE, or UNKNOWN
+	IsNot bool              // true for IS NOT <value>
+}
+
+func (n *BooleanTestNode) Type() NodeType { return NodeTypeBooleanTest }
+func (n *BooleanTestNode) String() string {
+	if n.IsNot {
+		return fmt.Sprintf("%s IS NOT %s", n.Field.String(), n.Value)
+	}
+	return fmt.Sprintf("%s IS %s", n.Field.String(), n.Value)
+}
+func (n *BooleanTestNode) Pos() scanner.Position { return n.pos }
 
 // BetweenNode represents a BETWEEN expression (e.g., age BETWEEN 30 AND 40)
 type BetweenNode struct {
 	baseNode
-	Field Node
-	Lower Node
-	Upper Node
-	IsNot bool // true for NOT BETWEEN
+	Field       Node
+	Lower       Node
+	Upper       Node
+	IsNot       bool // true for NOT BETWEEN
+	IsSymmetric bool // true for BETWEEN SYMMETRIC / NOT BETWEEN SYMMETRIC
 }
 
 func (n *BetweenNode) Type() NodeType {
@@ -262,6 +292,9 @@ func (n *BetweenNode) String() string {
 	op := "BETWEEN"
 	if n.IsNot {
 		op = "NOT BETWEEN"
+	}
+	if n.IsSymmetric {
+		op += " SYMMETRIC"
 	}
 	return fmt.Sprintf("%s %s %s AND %s", n.Field.String(), op, n.Lower.String(), n.Upper.String())
 }

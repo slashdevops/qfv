@@ -52,7 +52,7 @@ func TestFilterParser_DistinctPreservesValue(t *testing.T) {
 	if d.Value == nil {
 		t.Fatal("expected DISTINCT FROM value to be preserved, got nil")
 	}
-	if got, want := d.String(), "name DISTINCT FROM 'John'"; got != want {
+	if got, want := d.String(), "name IS DISTINCT FROM 'John'"; got != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
 }
