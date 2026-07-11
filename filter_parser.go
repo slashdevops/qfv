@@ -29,25 +29,36 @@ func (e *QFVFilterError) Error() string {
 // state required to parse one expression lives in a per-call filterParseState.
 type FilterParser struct {
 	allowedFields map[string]struct{}
+	// allowedOps is the set of permitted operators. A nil map means every
+	// operator is allowed (the default).
+	allowedOps map[Operator]struct{}
 }
 
-// NewFilterParser creates a new parser with the allowed fields
-func NewFilterParser(allowedFields []string) *FilterParser {
+// NewFilterParser creates a new parser with the allowed fields. By default every
+// operator is permitted; pass WithAllowedOperators / WithAllowedOperatorGroups to
+// restrict the grammar to a subset.
+func NewFilterParser(allowedFields []string, opts ...FilterOption) *FilterParser {
 	filterFields := make(map[string]struct{}, len(allowedFields))
 
 	for _, f := range allowedFields {
 		filterFields[f] = struct{}{}
 	}
 
-	return &FilterParser{
+	p := &FilterParser{
 		allowedFields: filterFields,
 	}
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p
 }
 
 // filterParseState holds the mutable state for a single Parse call. Keeping it
 // out of FilterParser is what makes FilterParser safe for concurrent reuse.
 type filterParseState struct {
 	allowedFields map[string]struct{}
+	allowedOps    map[Operator]struct{}
 	lexer         *Lexer
 	currentToken  Token
 	errors        []error
@@ -57,6 +68,7 @@ type filterParseState struct {
 func (p *FilterParser) Parse(input string) (Node, error) {
 	st := &filterParseState{
 		allowedFields: p.allowedFields,
+		allowedOps:    p.allowedOps,
 		lexer:         NewLexer(input),
 	}
 	st.lexer.Parse()
@@ -111,6 +123,18 @@ func (p *filterParseState) addError(err error) {
 	p.errors = append(p.errors, err)
 }
 
+// requireOp records a validation error when op is not in the allow-list. A nil
+// allow-list means every operator is permitted. Parsing continues either way so
+// that all problems are collected in a single pass.
+func (p *filterParseState) requireOp(op Operator) {
+	if p.allowedOps == nil {
+		return
+	}
+	if _, ok := p.allowedOps[op]; !ok {
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("operator %q is not allowed", op)})
+	}
+}
+
 // parseExpression parses an expression
 func (p *filterParseState) parseExpression() Node {
 	return p.parseLogicalOr()
@@ -123,6 +147,7 @@ func (p *filterParseState) parseLogicalOr() Node {
 	for p.currentToken.Type == TokenOperatorOr {
 		pos := p.currentToken.Pos
 		operator := p.currentToken.Type
+		p.requireOp(OpOr)
 		p.nextToken()
 		right := p.parseLogicalAnd()
 		left = &BinaryOperatorNode{
@@ -143,6 +168,7 @@ func (p *filterParseState) parseLogicalAnd() Node {
 	for p.currentToken.Type == TokenOperatorAnd {
 		pos := p.currentToken.Pos
 		operator := p.currentToken.Type
+		p.requireOp(OpAnd)
 		p.nextToken()
 		right := p.parseComparison()
 		left = &BinaryOperatorNode{
@@ -161,6 +187,7 @@ func (p *filterParseState) parseComparison() Node {
 	// Check for NOT operator
 	if p.currentToken.Type == TokenOperatorNot {
 		pos := p.currentToken.Pos
+		p.requireOp(OpNot)
 		p.nextToken()
 		expr := p.parseComparison()
 		return &UnaryOperatorNode{
@@ -203,10 +230,12 @@ func (p *filterParseState) parseComparison() Node {
 			switch strings.ToUpper(p.currentToken.Value) {
 			case "ISNULL":
 				pos := p.currentToken.Pos
+				p.requireOp(OpIsNull)
 				p.nextToken()
 				return &IsNullNode{baseNode: baseNode{pos: pos}, Field: field, IsNot: false}
 			case "NOTNULL":
 				pos := p.currentToken.Pos
+				p.requireOp(OpIsNull)
 				p.nextToken()
 				return &IsNullNode{baseNode: baseNode{pos: pos}, Field: field, IsNot: true}
 			}
@@ -217,35 +246,45 @@ func (p *filterParseState) parseComparison() Node {
 		case TokenOperatorEqual, TokenOperatorNotEqual, TokenOperatorNotEqualAlias,
 			TokenOperatorLessThan, TokenOperatorLessThanOrEqualTo,
 			TokenOperatorGreaterThan, TokenOperatorGreaterThanOrEqualTo:
+			p.requireOp(comparisonOperator(p.currentToken.Type))
 			return p.parseComparisonOperator(field)
 		case TokenOperatorLike:
+			p.requireOp(OpLike)
 			p.nextToken() // Consume LIKE (or ~~)
 			return p.parseLikeOperator(field, TokenOperatorLike)
 		case TokenOperatorILike:
+			p.requireOp(OpILike)
 			p.nextToken() // Consume ILIKE (or ~~*)
 			return p.parseLikeOperator(field, TokenOperatorILike)
 		case TokenOperatorNotLike:
+			p.requireOp(OpLike)
 			p.nextToken() // Consume !~~ (operator form of NOT LIKE)
 			return p.parseLikeOperator(field, TokenOperatorNotLike)
 		case TokenOperatorNotILike:
+			p.requireOp(OpILike)
 			p.nextToken() // Consume !~~* (operator form of NOT ILIKE)
 			return p.parseLikeOperator(field, TokenOperatorNotILike)
 		case TokenOperatorIn:
+			p.requireOp(OpIn)
 			p.nextToken() // Consume IN
 			return p.parseInOperator(field, false)
 		case TokenOperatorBetween:
+			p.requireOp(OpBetween)
 			p.nextToken() // Consume BETWEEN
 			return p.parseBetweenOperator(field, false)
 		case TokenOperatorIsNull:
 			p.nextToken() // Consume IS
 			return p.parseIsPredicate(field)
 		case TokenOperatorDistinct:
+			p.requireOp(OpIsDistinctFrom)
 			p.nextToken() // Consume DISTINCT
 			return p.parseDistinctOperator(field, false)
 		case TokenOperatorSimilarTo:
+			p.requireOp(OpSimilarTo)
 			p.nextToken() // Consume SIMILAR
 			return p.parseSimilarToOperator(field, false)
 		case TokenOperatorRegexMatchCS, TokenOperatorNotRegexMatchCS, TokenOperatorRegexMatchCI, TokenOperatorNotRegexMatchCI:
+			p.requireOp(OpRegexMatch)
 			opToken := p.currentToken
 			p.nextToken() // Consume regex operator
 			patternNode := p.parsePrimary()
@@ -275,21 +314,27 @@ func (p *filterParseState) parseComparison() Node {
 
 			switch p.currentToken.Type {
 			case TokenOperatorIn:
+				p.requireOp(OpIn)
 				p.nextToken() // Consume IN
 				return p.parseInOperator(field, true)
 			case TokenOperatorBetween:
+				p.requireOp(OpBetween)
 				p.nextToken() // Consume BETWEEN
 				return p.parseBetweenOperator(field, true)
 			case TokenOperatorLike:
+				p.requireOp(OpLike)
 				p.nextToken() // Consume LIKE
 				return p.parseLikeOperator(field, TokenOperatorNotLike)
 			case TokenOperatorILike:
+				p.requireOp(OpILike)
 				p.nextToken() // Consume ILIKE
 				return p.parseLikeOperator(field, TokenOperatorNotILike)
 			case TokenOperatorSimilarTo:
+				p.requireOp(OpSimilarTo)
 				p.nextToken() // Consume SIMILAR
 				return p.parseSimilarToOperator(field, true)
 			case TokenOperatorDistinct:
+				p.requireOp(OpIsDistinctFrom)
 				p.nextToken() // Consume DISTINCT
 				return p.parseDistinctOperator(field, true)
 			default:
@@ -447,11 +492,13 @@ func (p *filterParseState) parseIsPredicate(field Node) Node {
 	switch {
 	case p.currentToken.Type == TokenOperatorDistinct:
 		// IS [NOT] DISTINCT FROM <value>
+		p.requireOp(OpIsDistinctFrom)
 		p.nextToken() // Consume DISTINCT
 		return p.parseDistinctOperator(field, isNot)
 
 	case p.currentToken.Type == TokenBoolean:
 		// IS [NOT] TRUE | FALSE (TRUE/YES and FALSE/NO are lexed as booleans)
+		p.requireOp(OpBooleanTest)
 		truth := BooleanTrue
 		if v := strings.ToUpper(p.currentToken.Value); v == "FALSE" || v == "NO" {
 			truth = BooleanFalse
@@ -460,10 +507,12 @@ func (p *filterParseState) parseIsPredicate(field Node) Node {
 		return &BooleanTestNode{baseNode: baseNode{pos: pos}, Field: field, Value: truth, IsNot: isNot}
 
 	case p.currentToken.Type == TokenIdentifier && strings.ToUpper(p.currentToken.Value) == "NULL":
+		p.requireOp(OpIsNull)
 		p.nextToken() // Consume NULL
 		return &IsNullNode{baseNode: baseNode{pos: pos}, Field: field, IsNot: isNot}
 
 	case p.currentToken.Type == TokenIdentifier && strings.ToUpper(p.currentToken.Value) == "UNKNOWN":
+		p.requireOp(OpBooleanTest)
 		p.nextToken() // Consume UNKNOWN
 		return &BooleanTestNode{baseNode: baseNode{pos: pos}, Field: field, Value: BooleanUnknown, IsNot: isNot}
 	}

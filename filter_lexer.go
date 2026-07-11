@@ -3,6 +3,7 @@ package qfv
 import (
 	"strings"
 	"text/scanner"
+	"unicode"
 )
 
 // Lexer breaks the input string into tokens
@@ -22,6 +23,12 @@ func NewLexer(input string) *Lexer {
 	s.Mode = scanner.ScanIdents | scanner.ScanFloats | scanner.ScanStrings
 	s.Whitespace = 1<<'\t' | 1<<'\n' | 1<<'\r' | 1<<' ' // Define whitespace chars
 	s.Error = func(*scanner.Scanner, string) {}         // Suppress default errors
+	// Allow dotted identifiers (e.g. "q.v.last_name") to be scanned as a single
+	// token. A dot is permitted only in interior positions, so a leading digit
+	// still starts a number and "3.14" is scanned as a float, not an identifier.
+	s.IsIdentRune = func(ch rune, i int) bool {
+		return ch == '_' || unicode.IsLetter(ch) || (i > 0 && (unicode.IsDigit(ch) || ch == '.'))
+	}
 
 	l := &Lexer{s: s, input: input, pos: -1} // Start at -1, first Next moves to 0
 	l.inputLen = len(input)
