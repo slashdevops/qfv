@@ -35,6 +35,42 @@ invalid or malicious input reaching your database.
 All three parsers are **safe for concurrent use** — build them once and share
 them across goroutines.
 
+## Where QFV fits in a request
+
+QFV sits between the untrusted query string and your data layer. Build the
+parsers once at startup; run them per request to reject anything that isn't
+explicitly allowed *before* you touch the database.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as HTTP handler
+    participant P as QFV parsers
+    participant DB as Database
+
+    C->>H: GET /users?fields=…&filter=…&sort=…
+    H->>P: Parse(fields), Parse(filter), Parse(sort)
+    alt any parameter invalid
+        P-->>H: error (unknown field / disallowed operator / bad syntax)
+        H-->>C: 400 Bad Request
+    else all valid
+        P-->>H: FieldsNode + AST + SortNode
+        H->>DB: build a safe query from the validated output
+        DB-->>H: rows
+        H-->>C: 200 OK
+    end
+```
+
+```mermaid
+flowchart LR
+    boot["App start"] --> build["Build parsers once<br/>NewFilterParser / NewSortParser / NewFieldsParser"]
+    build --> pool["Shared, concurrency-safe instances"]
+    pool -. reused per request .-> req1["Request 1"]
+    pool -. reused per request .-> req2["Request 2"]
+    pool -. reused per request .-> reqN["Request N"]
+```
+
 ## Complete example
 
 ```go

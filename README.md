@@ -66,6 +66,49 @@ func main() {
 - **Returns an AST** you can walk or render, with precise, aggregated errors.
 - **Concurrency-safe** parsers.
 
+## How it works
+
+Every parser is gated by the same allow-list of fields. Untrusted query-string
+parameters go in; validated, structured values come out — an AST for filters,
+typed lists for fields and sorting — so nothing outside your allow-list ever
+reaches your data layer.
+
+```mermaid
+flowchart LR
+    Q["HTTP query string<br/>?fields=…&filter=…&sort=…"]
+
+    Q --> FP["FieldsParser"]
+    Q --> FI["FilterParser"]
+    Q --> SP["SortParser"]
+
+    AL(["Allow-list of fields"]) -. gates .-> FP
+    AL -. gates .-> FI
+    AL -. gates .-> SP
+
+    FP --> FN["FieldsNode<br/>[]string"]
+    FI --> AST["Filter AST<br/>(Node tree)"]
+    SP --> SN["SortNode<br/>[]SortFieldNode"]
+
+    FN --> APP["Your handler / SQL builder"]
+    AST --> APP
+    SN --> APP
+
+    APP --> DB[("Database")]
+```
+
+The filter parser is a hand-written recursive-descent parser: a `Lexer`
+tokenizes the input, then the parser builds the AST while honoring operator
+precedence (`OR` < `AND` < comparison) and the allow-list.
+
+```mermaid
+flowchart LR
+    IN["input string"] --> LEX["Lexer<br/>tokenize"]
+    LEX --> TOK["[]Token"]
+    TOK --> PAR["FilterParser<br/>recursive descent"]
+    PAR --> AST["AST root (Node)"]
+    PAR -. "collects every error" .-> ERR["errors.Join(…)"]
+```
+
 ## Documentation
 
 Full documentation lives in [`docs/`](docs/README.md):

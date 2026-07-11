@@ -16,6 +16,48 @@ The parser guarantees that:
 - the syntax is valid and the **entire** input is consumed,
 - the result is a well-formed AST.
 
+## How the filter parser works
+
+Parsing is a two-stage pipeline. The `Lexer` first turns the raw string into a
+flat list of tokens; the recursive-descent parser then consumes those tokens to
+build the AST, checking each field against the allow-list and each operator
+against the (optional) operator allow-list as it goes.
+
+```mermaid
+flowchart LR
+    IN["first_name = 'John' AND age >= 18"] --> LEX["Lexer.Parse()"]
+
+    subgraph tokens["[]Token"]
+        direction LR
+        t1["IDENT<br/>first_name"] --- t2["=<br/>OPERATOR"] --- t3["STRING<br/>'John'"] --- t4["AND"] --- t5["IDENT<br/>age"] --- t6[">="] --- t7["INT<br/>18"]
+    end
+
+    LEX --> tokens
+    tokens --> PAR["parseExpression()"]
+    PAR --> AST["AST root (Node)"]
+    PAR -. "every problem collected" .-> ERR["errors.Join(…)"]
+```
+
+### Operator precedence
+
+The parser encodes precedence as a ladder of methods. `OR` binds loosest and is
+tried first; each level descends to the next tighter-binding one, and a
+parenthesized group re-enters the ladder at the top.
+
+```mermaid
+flowchart TD
+    OR["parseLogicalOr()<br/>OR — lowest precedence"]
+    AND["parseLogicalAnd()<br/>AND"]
+    CMP["parseComparison()<br/>NOT · ( ) · field OP value · IS/IN/BETWEEN/LIKE/…"]
+    PRI["parsePrimary()<br/>string · int · float · bool — highest"]
+
+    OR --> AND --> CMP --> PRI
+    CMP -->|"( expr )"| OR
+```
+
+So `a = 1 OR b = 2 AND c = 3` parses as `a = 1 OR (b = 2 AND c = 3)` — `AND`
+binds tighter than `OR`.
+
 ## Supported operators
 
 | Category | Operators |
@@ -47,6 +89,25 @@ node, _ := p.Parse("user.profile.age >= 18 AND user.name = 'John'")
 A dot is only valid **inside** an identifier, so numeric literals such as `3.14`
 are unaffected. Unknown dotted fields are rejected by the allow-list like any
 other field.
+
+## The `IS` predicate family
+
+`IS` is a single entry point into several predicates. After consuming `IS` (and
+an optional `NOT`), the parser branches on the next keyword to build the right
+node:
+
+```mermaid
+flowchart LR
+    IS(["field IS"]) --> NOT{"NOT?"}
+    NOT -->|"optional"| KW{"next keyword"}
+
+    KW -->|"NULL"| N["IsNullNode"]
+    KW -->|"TRUE / FALSE"| B["BooleanTestNode"]
+    KW -->|"UNKNOWN"| B
+    KW -->|"DISTINCT FROM value"| D["DistinctNode"]
+
+    N -. "shorthands" .- SH["field ISNULL / NOTNULL<br/>→ IsNullNode"]
+```
 
 ## Worked examples
 
@@ -103,7 +164,86 @@ other field.
 
 ## AST nodes
 
-`Parse` returns a `qfv.Node`. Common concrete types:
+`Parse` returns a `qfv.Node` — the root of a tree you can walk or render.
+For example, the expression
+
+```text
+(first_name = 'John' OR first_name = 'Jane') AND age > 30
+```
+
+parses into this tree (precedence makes `AND` the root, with the parenthesized
+`OR` on its left):
+
+```mermaid
+graph TD
+    AND["BinaryOperatorNode<br/>AND"]
+    AND --> GRP["GroupNode<br/>( … )"]
+    AND --> GT["BinaryOperatorNode<br/>&gt;"]
+
+    GRP --> OR["BinaryOperatorNode<br/>OR"]
+    OR --> EQ1["BinaryOperatorNode<br/>="]
+    OR --> EQ2["BinaryOperatorNode<br/>="]
+
+    EQ1 --> id1["IdentifierNode<br/>first_name"]
+    EQ1 --> lit1["LiteralNode<br/>'John'"]
+    EQ2 --> id2["IdentifierNode<br/>first_name"]
+    EQ2 --> lit2["LiteralNode<br/>'Jane'"]
+
+    GT --> id3["IdentifierNode<br/>age"]
+    GT --> lit3["LiteralNode<br/>30"]
+```
+
+Every node implements the `Node` interface, so you can type-switch on the
+concrete types to walk or transform the tree:
+
+```mermaid
+classDiagram
+    class Node {
+        <<interface>>
+        +Type() NodeType
+        +String() string
+        +Pos() scanner.Position
+    }
+
+    Node <|.. IdentifierNode
+    Node <|.. LiteralNode
+    Node <|.. UnaryOperatorNode
+    Node <|.. BinaryOperatorNode
+    Node <|.. GroupNode
+    Node <|.. InNode
+    Node <|.. BetweenNode
+    Node <|.. IsNullNode
+    Node <|.. BooleanTestNode
+    Node <|.. DistinctNode
+    Node <|.. SimilarToNode
+    Node <|.. RegexMatchNode
+
+    class BinaryOperatorNode {
+        +Left Node
+        +Right Node
+        +Operator TokenType
+    }
+    class InNode {
+        +Field Node
+        +Values []Node
+        +IsNot bool
+    }
+    class BetweenNode {
+        +Field Node
+        +Lower Node
+        +Upper Node
+        +IsNot bool
+        +IsSymmetric bool
+    }
+    class RegexMatchNode {
+        +Field Node
+        +Pattern Node
+        +IsNot bool
+        +IsCaseInsensitive bool
+    }
+```
+
+Common concrete types:
 
 | Node | Produced by |
 | --- | --- |

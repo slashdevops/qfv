@@ -24,6 +24,30 @@ p.Parse("name LIKE '%x%'")                     // error: operator "LIKE" is not 
 The two options are **additive** — groups expand to their operators and merge
 with any individually listed operators.
 
+```mermaid
+flowchart LR
+    G["WithAllowedOperatorGroups(GroupComparison, GroupLogical)"] --> EXP["expand each group<br/>to its operators"]
+    O["WithAllowedOperators(OpIn)"] --> SET
+    EXP --> SET(["allowed-operator set (union)"])
+    SET --> CHK{"operator seen<br/>while parsing?"}
+    CHK -->|"in set"| OK["accept"]
+    CHK -->|"not in set"| ERR["error:<br/>operator is not allowed"]
+```
+
+### How gating decides
+
+Every operator the parser encounters is checked against the allowed set. A
+**nil** set (neither option supplied) is the default and permits everything.
+
+```mermaid
+flowchart TD
+    T["operator token in input"] --> C{"allow-list<br/>configured?"}
+    C -->|"no (nil) — default"| OK["allowed<br/>(every operator permitted)"]
+    C -->|"yes"| M{"operator in set?"}
+    M -->|"yes"| OK
+    M -->|"no"| ERR["QFVFilterError:<br/>operator is not allowed"]
+```
+
 ### Operators
 
 | Operator | Matches |
@@ -59,6 +83,18 @@ with any individually listed operators.
 
 `OperatorGroup.Operators()` returns the operators a group expands to.
 
+```mermaid
+flowchart LR
+    GroupLogical --> OpAnd & OpOr & OpNot
+    GroupComparison --> OpEqual & OpNotEqual & OpLessThan & OpLessThanOrEqual & OpGreaterThan & OpGreaterThanOrEqual
+    GroupPattern --> OpLike & OpILike & OpSimilarTo & OpRegexMatch
+    GroupMembership --> OpIn
+    GroupRange --> OpBetween
+    GroupNull --> OpIsNull
+    GroupBoolean --> OpBooleanTest
+    GroupDistinct --> OpIsDistinctFrom
+```
+
 ### Negation semantics
 
 A negated **predicate** is governed by its base operator, not by `OpNot`:
@@ -67,6 +103,16 @@ A negated **predicate** is governed by its base operator, not by `OpNot`:
   are allowed whenever `OpIn` / `OpLike` / `OpBetween` / `OpSimilarTo` /
   `OpIsDistinctFrom` (respectively) are allowed.
 - `OpNot` governs only the **standalone** logical `NOT`, e.g. `NOT (age > 30)`.
+
+```mermaid
+flowchart TD
+    N["NOT appears in input"] --> K{"what follows?"}
+    K -->|"( expr ) or a comparison"| U["UnaryOperatorNode<br/>governed by OpNot"]
+    K -->|"IN / LIKE / BETWEEN /<br/>SIMILAR TO / DISTINCT FROM"| P["predicate node with IsNot=true<br/>governed by the base operator"]
+
+    U -. "allow-list check" .-> gnot{"OpNot allowed?"}
+    P -. "allow-list check" .-> gbase{"OpIn / OpLike / OpBetween /<br/>OpSimilarTo / OpIsDistinctFrom allowed?"}
+```
 
 So allowing `OpEqual` but not `OpNot` accepts `a = 1` but rejects `NOT (a = 1)`.
 
