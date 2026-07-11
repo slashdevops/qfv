@@ -1,6 +1,11 @@
 # Query Filters Validator (QFV)
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/slashdevops/qfv.svg)](https://pkg.go.dev/github.com/slashdevops/qfv)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/slashdevops/qfv?style=plastic)
+[![Go Report Card](https://goreportcard.com/badge/github.com/slashdevops/qfv)](https://goreportcard.com/report/github.com/slashdevops/qfv)
+[![license](https://img.shields.io/github/license/slashdevops/qfv.svg)](https://github.com/slashdevops/qfv/blob/main/LICENSE)
+[![Release](https://github.com/slashdevops/qfv/actions/workflows/release.yml/badge.svg)](https://github.com/slashdevops/qfv/actions/workflows/release.yml)
+[![release](https://img.shields.io/github/release/slashdevops/qfv/all.svg)](https://github.com/slashdevops/qfv/releases)
 
 A Go library for parsing and validating the query expressions commonly used in
 REST APIs and database queries — **fields selection**, **filtering**, and
