@@ -200,20 +200,12 @@ func TestFilterParser_Parse(t *testing.T) {
 			allowedFields: []string{"name", "age", "status"},
 			wantErr:       false,
 			checkNode: func(t *testing.T, node Node) {
-				unaryOp, ok := node.(*UnaryOperatorNode)
+				inExpr, ok := node.(*InNode)
 				if !ok {
-					t.Fatalf("expected UnaryOperatorNode, got %T", node)
+					t.Fatalf("expected InNode, got %T", node)
 				}
-				if unaryOp.Operator != TokenOperatorNot {
-					t.Errorf("expected NOT operator, got %s", unaryOp.Operator)
-				}
-
-				inExpr, ok := unaryOp.X.(*InNode)
-				if !ok {
-					t.Fatalf("expected InNode for NOT operand, got %T", unaryOp.X)
-				}
-				if inExpr.IsNot { // The inner InNode should have IsNot=false
-					t.Errorf("expected IsNot to be false in the InNode")
+				if !inExpr.IsNot {
+					t.Errorf("expected IsNot to be true in the InNode")
 				}
 				if len(inExpr.Values) != 2 {
 					t.Fatalf("expected 2 values in NOT IN, got %d", len(inExpr.Values))
@@ -265,20 +257,12 @@ func TestFilterParser_Parse(t *testing.T) {
 			allowedFields: []string{"name", "age", "status"},
 			wantErr:       false,
 			checkNode: func(t *testing.T, node Node) {
-				unaryOp, ok := node.(*UnaryOperatorNode)
+				betweenExpr, ok := node.(*BetweenNode)
 				if !ok {
-					t.Fatalf("expected UnaryOperatorNode, got %T", node)
+					t.Fatalf("expected BetweenNode, got %T", node)
 				}
-				if unaryOp.Operator != TokenOperatorNot {
-					t.Errorf("expected NOT operator, got %s", unaryOp.Operator)
-				}
-
-				betweenExpr, ok := unaryOp.X.(*BetweenNode)
-				if !ok {
-					t.Fatalf("expected BetweenNode for NOT operand, got %T", unaryOp.X)
-				}
-				if betweenExpr.IsNot { // The inner BetweenNode should have IsNot=false
-					t.Errorf("expected IsNot to be false in the BetweenNode")
+				if !betweenExpr.IsNot {
+					t.Errorf("expected IsNot to be true in the BetweenNode")
 				}
 			},
 		},
@@ -319,20 +303,12 @@ func TestFilterParser_Parse(t *testing.T) {
 			allowedFields: []string{"name", "age", "status"},
 			wantErr:       false,
 			checkNode: func(t *testing.T, node Node) {
-				unaryOp, ok := node.(*UnaryOperatorNode)
+				likeExpr, ok := node.(*BinaryOperatorNode)
 				if !ok {
-					t.Fatalf("expected UnaryOperatorNode, got %T", node)
+					t.Fatalf("expected BinaryOperatorNode, got %T", node)
 				}
-				if unaryOp.Operator != TokenOperatorNot {
-					t.Errorf("expected NOT operator, got %s", unaryOp.Operator)
-				}
-
-				likeExpr, ok := unaryOp.X.(*BinaryOperatorNode)
-				if !ok {
-					t.Fatalf("expected BinaryOperatorNode for NOT operand, got %T", unaryOp.X)
-				}
-				if likeExpr.Operator != TokenOperatorLike { // Check the inner node is LIKE
-					t.Errorf("expected LIKE operator in the inner node, got %s", likeExpr.Operator)
+				if likeExpr.Operator != TokenOperatorNotLike {
+					t.Errorf("expected NOT LIKE operator, got %s", likeExpr.Operator)
 				}
 			},
 		},
@@ -460,22 +436,13 @@ func TestFilterParser_Parse(t *testing.T) {
 			allowedFields: []string{"name", "age", "status"},
 			wantErr:       false,
 			checkNode: func(t *testing.T, node Node) {
-				unaryOp, ok := node.(*UnaryOperatorNode)
+				similarToExpr, ok := node.(*SimilarToNode)
 				if !ok {
-					t.Fatalf("expected UnaryOperatorNode, got %T", node)
+					t.Fatalf("expected SimilarToNode, got %T", node)
 				}
-				if unaryOp.Operator != TokenOperatorNot {
-					t.Errorf("expected NOT operator, got %s", unaryOp.Operator)
+				if !similarToExpr.IsNot {
+					t.Errorf("expected IsNot to be true in the SimilarToNode")
 				}
-
-				similarToExpr, ok := unaryOp.X.(*SimilarToNode)
-				if !ok {
-					t.Fatalf("expected SimilarToNode for NOT operand, got %T", unaryOp.X)
-				}
-				if similarToExpr.IsNot { // The inner SimilarToNode should have IsNot=false
-					t.Errorf("expected IsNot to be false in the SimilarToNode")
-				}
-				// Add checks for field/pattern if needed
 			},
 		},
 		{
@@ -499,16 +466,12 @@ func TestFilterParser_Parse(t *testing.T) {
 			allowedFields: []string{"name"},
 			wantErr:       false,
 			checkNode: func(t *testing.T, node Node) {
-				unaryOp, ok := node.(*UnaryOperatorNode)
+				similarToExpr, ok := node.(*SimilarToNode)
 				if !ok {
-					t.Fatalf("expected UnaryOperatorNode, got %T", node)
+					t.Fatalf("expected SimilarToNode, got %T", node)
 				}
-				if unaryOp.Operator != TokenOperatorNot {
-					t.Errorf("expected NOT operator")
-				}
-				_, ok = unaryOp.X.(*SimilarToNode)
-				if !ok {
-					t.Fatalf("expected SimilarToNode for NOT operand, got %T", unaryOp.X)
+				if !similarToExpr.IsNot {
+					t.Errorf("expected IsNot to be true in the SimilarToNode")
 				}
 			},
 		},
@@ -534,21 +497,21 @@ func TestFilterParser_Parse(t *testing.T) {
 			name:          "NOT DISTINCT FROM operator",
 			input:         "name NOT DISTINCT FROM 'John'",
 			allowedFields: []string{"name"},
-			wantErr:       false, // Assuming parser handles this now
+			wantErr:       false,
 			checkNode: func(t *testing.T, node Node) {
-				unaryOp, ok := node.(*UnaryOperatorNode)
+				distinctExpr, ok := node.(*DistinctNode)
 				if !ok {
-					t.Fatalf("expected UnaryOperatorNode, got %T", node)
+					t.Fatalf("expected DistinctNode, got %T", node)
 				}
-				if unaryOp.Operator != TokenOperatorNot {
-					t.Errorf("expected NOT operator")
+				if !distinctExpr.IsNot {
+					t.Errorf("expected IsNot to be true in DistinctNode")
 				}
-				distinctExpr, ok := unaryOp.X.(*DistinctNode)
+				value, ok := distinctExpr.Value.(*LiteralNode)
 				if !ok {
-					t.Fatalf("expected DistinctNode for NOT operand, got %T", unaryOp.X)
+					t.Fatalf("expected LiteralNode for value, got %T", distinctExpr.Value)
 				}
-				if distinctExpr.IsNot {
-					t.Errorf("expected IsNot to be false in DistinctNode")
+				if value.Value != "John" {
+					t.Errorf("expected value 'John', got %v", value.Value)
 				}
 			},
 		},

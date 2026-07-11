@@ -29,12 +29,12 @@ func (n FieldsNode) Type() NodeType {
 
 // FieldsParser parses the query parameter for fields
 type FieldsParser struct {
-	allowedFieldsFields map[string]any // any because don't allocate memory for struct{}
+	allowedFieldsFields map[string]struct{}
 }
 
 // NewFieldsParser creates a new parser with the allowed fields
 func NewFieldsParser(allowedFields []string) *FieldsParser {
-	fieldsFields := make(map[string]any, len(allowedFields))
+	fieldsFields := make(map[string]struct{}, len(allowedFields))
 
 	for _, f := range allowedFields {
 		fieldsFields[f] = struct{}{}

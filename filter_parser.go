@@ -1,6 +1,7 @@
 package qfv
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -21,17 +22,18 @@ func (e *QFVFilterError) Error() string {
 	return fmt.Sprintf("error: %s", e.Message)
 }
 
-// FilterParser parses the query parameter for filtering
+// FilterParser parses the query parameter for filtering.
+//
+// A FilterParser holds only the immutable set of allowed fields, so a single
+// instance is safe for concurrent use by multiple goroutines: the mutable
+// state required to parse one expression lives in a per-call filterParseState.
 type FilterParser struct {
-	allowedFields map[string]any // any because don't allocate memory for struct{}
-	lexer         *Lexer
-	currentToken  Token
-	errors        []error
+	allowedFields map[string]struct{}
 }
 
 // NewFilterParser creates a new parser with the allowed fields
 func NewFilterParser(allowedFields []string) *FilterParser {
-	filterFields := make(map[string]any, len(allowedFields))
+	filterFields := make(map[string]struct{}, len(allowedFields))
 
 	for _, f := range allowedFields {
 		filterFields[f] = struct{}{}
@@ -42,41 +44,59 @@ func NewFilterParser(allowedFields []string) *FilterParser {
 	}
 }
 
+// filterParseState holds the mutable state for a single Parse call. Keeping it
+// out of FilterParser is what makes FilterParser safe for concurrent reuse.
+type filterParseState struct {
+	allowedFields map[string]struct{}
+	lexer         *Lexer
+	currentToken  Token
+	errors        []error
+}
+
 // Parse parses the filter query and returns the AST
 func (p *FilterParser) Parse(input string) (Node, error) {
-	p.lexer = NewLexer(input)
-	p.lexer.Parse()
-	p.errors = nil
+	st := &filterParseState{
+		allowedFields: p.allowedFields,
+		lexer:         NewLexer(input),
+	}
+	st.lexer.Parse()
 
 	// Check for illegal tokens in the input
-	for _, token := range p.lexer.tokens {
+	for _, token := range st.lexer.tokens {
 		if token.Type == TokenIllegal {
-			p.addError(&QFVFilterError{Field: token.Value, Message: "illegal token"})
+			st.addError(&QFVFilterError{Field: token.Value, Message: "illegal token"})
 		}
 	}
 
-	p.nextToken()
+	st.nextToken()
 
-	if p.currentToken.Type == TokenEOF {
+	if st.currentToken.Type == TokenEOF {
 		return nil, &QFVFilterError{Message: "empty filter expression"}
 	}
 
-	node := p.parseExpression()
+	node := st.parseExpression()
 
-	if len(p.errors) > 0 {
-		return nil, &QFVFilterError{Message: fmt.Sprintf("parsing errors: %v", p.errors)}
+	// The whole input must be consumed. Any leftover tokens mean only a prefix
+	// of the input was a valid expression (e.g. "name = 'John' garbage"), which
+	// must be reported instead of silently accepted.
+	if st.currentToken.Type != TokenEOF {
+		st.addError(&QFVFilterError{Message: fmt.Sprintf("unexpected token %q after a complete expression", st.currentToken.Value)})
+	}
+
+	if len(st.errors) > 0 {
+		return nil, errors.Join(st.errors...)
 	}
 
 	return node, nil
 }
 
 // nextToken advances to the next token
-func (p *FilterParser) nextToken() {
+func (p *filterParseState) nextToken() {
 	p.currentToken = p.lexer.Next()
 }
 
 // expect checks if the current token is of the expected type
-func (p *FilterParser) expect(tokenType TokenType) bool {
+func (p *filterParseState) expect(tokenType TokenType) bool {
 	if p.currentToken.Type == tokenType {
 		p.nextToken()
 		return true
@@ -87,17 +107,17 @@ func (p *FilterParser) expect(tokenType TokenType) bool {
 }
 
 // addError adds an error to the error list
-func (p *FilterParser) addError(err error) {
+func (p *filterParseState) addError(err error) {
 	p.errors = append(p.errors, err)
 }
 
 // parseExpression parses an expression
-func (p *FilterParser) parseExpression() Node {
+func (p *filterParseState) parseExpression() Node {
 	return p.parseLogicalOr()
 }
 
 // parseLogicalOr parses OR expressions
-func (p *FilterParser) parseLogicalOr() Node {
+func (p *filterParseState) parseLogicalOr() Node {
 	left := p.parseLogicalAnd()
 
 	for p.currentToken.Type == TokenOperatorOr {
@@ -117,7 +137,7 @@ func (p *FilterParser) parseLogicalOr() Node {
 }
 
 // parseLogicalAnd parses AND expressions
-func (p *FilterParser) parseLogicalAnd() Node {
+func (p *filterParseState) parseLogicalAnd() Node {
 	left := p.parseComparison()
 
 	for p.currentToken.Type == TokenOperatorAnd {
@@ -137,7 +157,7 @@ func (p *FilterParser) parseLogicalAnd() Node {
 }
 
 // parseComparison parses comparison expressions
-func (p *FilterParser) parseComparison() Node {
+func (p *filterParseState) parseComparison() Node {
 	// Check for NOT operator
 	if p.currentToken.Type == TokenOperatorNot {
 		pos := p.currentToken.Pos
@@ -185,22 +205,22 @@ func (p *FilterParser) parseComparison() Node {
 			return p.parseComparisonOperator(field)
 		case TokenOperatorLike:
 			p.nextToken() // Consume LIKE
-			return p.parseLikeOperator(field)
+			return p.parseLikeOperator(field, false)
 		case TokenOperatorIn:
 			p.nextToken() // Consume IN
-			return p.parseInOperator(field)
+			return p.parseInOperator(field, false)
 		case TokenOperatorBetween:
 			p.nextToken() // Consume BETWEEN
-			return p.parseBetweenOperator(field)
+			return p.parseBetweenOperator(field, false)
 		case TokenOperatorIsNull:
 			p.nextToken() // Consume IS
 			return p.parseIsNullOperator(field)
 		case TokenOperatorDistinct:
 			p.nextToken() // Consume DISTINCT
-			return p.parseDistinctOperator(field)
+			return p.parseDistinctOperator(field, false)
 		case TokenOperatorSimilarTo:
 			p.nextToken() // Consume SIMILAR
-			return p.parseSimilarToOperator(field)
+			return p.parseSimilarToOperator(field, false)
 		case TokenOperatorRegexMatchCS, TokenOperatorNotRegexMatchCS, TokenOperatorRegexMatchCI, TokenOperatorNotRegexMatchCI:
 			opToken := p.currentToken
 			p.nextToken() // Consume regex operator
@@ -223,69 +243,32 @@ func (p *FilterParser) parseComparison() Node {
 				IsCaseInsensitive: opToken.Type == TokenOperatorRegexMatchCI || opToken.Type == TokenOperatorNotRegexMatchCI,
 			}
 		case TokenOperatorNot:
-			// Handle NOT operators (NOT IN, NOT BETWEEN, NOT LIKE, NOT SIMILAR TO, IS NOT NULL, NOT DISTINCT FROM)
-			notPos := p.currentToken.Pos
+			// Handle NOT operators (NOT IN, NOT BETWEEN, NOT LIKE, NOT SIMILAR TO,
+			// NOT DISTINCT FROM). Negation is recorded on the resulting node via its
+			// IsNot flag (or the NOT LIKE operator), not by wrapping in a NOT node,
+			// so that consumers get a single, self-describing node.
 			p.nextToken() // Consume NOT
 
-			var notExpr Node
 			switch p.currentToken.Type {
 			case TokenOperatorIn:
 				p.nextToken() // Consume IN
-				notExpr = p.parseInOperator(field)
+				return p.parseInOperator(field, true)
 			case TokenOperatorBetween:
 				p.nextToken() // Consume BETWEEN
-				notExpr = p.parseBetweenOperator(field)
+				return p.parseBetweenOperator(field, true)
 			case TokenOperatorLike:
 				p.nextToken() // Consume LIKE
-				notExpr = p.parseLikeOperator(field)
+				return p.parseLikeOperator(field, true)
 			case TokenOperatorSimilarTo:
-				p.nextToken()                             // Consume SIMILAR
-				notExpr = p.parseSimilarToOperator(field) // Expects TO next
-			case TokenOperatorIsNull: // Handle IS NOT NULL here
-				p.nextToken() // Consume IS
-				// parseIsNullOperator handles the NOT internally now based on token sequence
-				notExpr = p.parseIsNullOperator(field)
-				// Check if parseIsNullOperator correctly identified IS NOT NULL
-				if isNullNode, ok := notExpr.(*IsNullNode); !ok || !isNullNode.IsNot {
-					// If parseIsNullOperator didn't return an IsNullNode with IsNot=true,
-					// it means the sequence wasn't "IS NOT NULL".
-					// The error would have been added inside parseIsNullOperator.
-					// We might return the field or a generic error node, but returning
-					// the result from parseIsNullOperator (which might be 'field') is consistent.
-					return notExpr // Return whatever parseIsNullOperator returned on error
-				}
-				// If it was IS NOT NULL, we don't need to wrap it again
-				return notExpr
-			case TokenOperatorDistinct: // Handle NOT DISTINCT FROM here
+				p.nextToken() // Consume SIMILAR
+				return p.parseSimilarToOperator(field, true)
+			case TokenOperatorDistinct:
 				p.nextToken() // Consume DISTINCT
-				// parseDistinctOperator handles the FROM internally
-				notExpr = p.parseDistinctOperator(field)
-				// Similar to IS NOT NULL, check if parseDistinctOperator failed
-				if _, ok := notExpr.(*DistinctNode); !ok {
-					return notExpr // Return error node or field
-				}
+				return p.parseDistinctOperator(field, true)
 			default:
 				p.addError(&QFVFilterError{Message: fmt.Sprintf("unexpected token after NOT: %s", p.currentToken.Type)})
-				// If NOT is followed by something unexpected, return a unary NOT node with the field
-				// This might not be the most robust error handling, but fits the previous pattern.
-				return &UnaryOperatorNode{
-					baseNode: baseNode{pos: notPos},
-					Operator: TokenOperatorNot,
-					X:        field, // Apply NOT to the field itself? Or error?
-				}
+				return field
 			}
-
-			// Wrap the parsed expression (LIKE, IN, BETWEEN, SIMILAR TO, DISTINCT) in a UnaryOperatorNode(NOT)
-			// Skip wrapping if it was handled internally (IS NOT NULL)
-			if _, isIsNull := notExpr.(*IsNullNode); !isIsNull {
-				return &UnaryOperatorNode{
-					baseNode: baseNode{pos: notPos},
-					Operator: TokenOperatorNot,
-					X:        notExpr,
-				}
-			}
-			// For IS NOT NULL, return the node directly as IsNot is set inside
-			return notExpr
 
 		default:
 			p.addError(&QFVFilterError{Field: field.Name, Message: "unexpected token after field"})
@@ -298,7 +281,7 @@ func (p *FilterParser) parseComparison() Node {
 }
 
 // parseComparisonOperator parses comparison operators (=, <>, !=, <, <=, >, >=)
-func (p *FilterParser) parseComparisonOperator(field Node) Node {
+func (p *filterParseState) parseComparisonOperator(field Node) Node {
 	pos := p.currentToken.Pos
 	operator := p.currentToken.Type
 	p.nextToken()
@@ -313,7 +296,7 @@ func (p *FilterParser) parseComparisonOperator(field Node) Node {
 
 // parseSimilarToOperator parses SIMILAR TO operator
 // Expects the current token to be TO after SIMILAR was consumed.
-func (p *FilterParser) parseSimilarToOperator(field Node) Node {
+func (p *filterParseState) parseSimilarToOperator(field Node, isNot bool) Node {
 	pos := p.lexer.Current().Pos // Use position of SIMILAR token (already consumed)
 	if p.currentToken.Type != TokenIdentifier || strings.ToUpper(p.currentToken.Value) != "TO" {
 		p.addError(&QFVFilterError{Message: "expected TO after SIMILAR"})
@@ -325,26 +308,30 @@ func (p *FilterParser) parseSimilarToOperator(field Node) Node {
 		baseNode: baseNode{pos: pos},
 		Field:    field,
 		Pattern:  pattern,
-		IsNot:    false, // NOT is handled by parseComparison
+		IsNot:    isNot,
 	}
 }
 
 // parseLikeOperator parses LIKE operator
 // Expects the current token to be the pattern after LIKE was consumed.
-func (p *FilterParser) parseLikeOperator(field Node) Node {
+func (p *filterParseState) parseLikeOperator(field Node, isNot bool) Node {
 	pos := p.lexer.Current().Pos // Use position of LIKE token (already consumed)
 	pattern := p.parsePrimary()
+	operator := TokenOperatorLike
+	if isNot {
+		operator = TokenOperatorNotLike
+	}
 	return &BinaryOperatorNode{
 		baseNode: baseNode{pos: pos},
 		Left:     field,
 		Right:    pattern,
-		Operator: TokenOperatorLike,
+		Operator: operator,
 	}
 }
 
 // parseInOperator parses IN operator
 // Expects the current token to be LPAREN after IN was consumed.
-func (p *FilterParser) parseInOperator(field Node) Node {
+func (p *filterParseState) parseInOperator(field Node, isNot bool) Node {
 	pos := p.lexer.Current().Pos // Use position of IN token (already consumed)
 	if !p.expect(TokenLPAREN) {
 		p.addError(&QFVFilterError{Message: "expected opening parenthesis after IN"})
@@ -376,14 +363,14 @@ func (p *FilterParser) parseInOperator(field Node) Node {
 	return &InNode{
 		baseNode: baseNode{pos: pos},
 		Field:    field,
-		IsNot:    false, // NOT is handled by parseComparison
+		IsNot:    isNot,
 		Values:   values,
 	}
 }
 
 // parseBetweenOperator parses BETWEEN operator
 // Expects the current token to be the lower bound after BETWEEN was consumed.
-func (p *FilterParser) parseBetweenOperator(field Node) Node {
+func (p *filterParseState) parseBetweenOperator(field Node, isNot bool) Node {
 	pos := p.lexer.Current().Pos // Use position of BETWEEN token (already consumed)
 	lower := p.parsePrimary()
 
@@ -399,13 +386,13 @@ func (p *FilterParser) parseBetweenOperator(field Node) Node {
 		Field:    field,
 		Lower:    lower,
 		Upper:    upper,
-		IsNot:    false, // NOT is handled by parseComparison
+		IsNot:    isNot,
 	}
 }
 
 // parseIsNullOperator parses IS [NOT] NULL operator
 // Expects the current token to be NOT or NULL after IS was consumed.
-func (p *FilterParser) parseIsNullOperator(field Node) Node {
+func (p *filterParseState) parseIsNullOperator(field Node) Node {
 	pos := p.lexer.Current().Pos // Use position of IS token (already consumed)
 	isNot := false
 	if p.currentToken.Type == TokenOperatorNot {
@@ -433,7 +420,7 @@ func (p *FilterParser) parseIsNullOperator(field Node) Node {
 
 // parseDistinctOperator parses DISTINCT FROM operator
 // Expects the current token to be FROM after DISTINCT was consumed.
-func (p *FilterParser) parseDistinctOperator(field Node) Node {
+func (p *filterParseState) parseDistinctOperator(field Node, isNot bool) Node {
 	pos := p.lexer.Current().Pos // Use position of DISTINCT token (already consumed)
 	// Expect FROM (treated as identifier by lexer)
 	if p.currentToken.Type != TokenIdentifier || strings.ToUpper(p.currentToken.Value) != "FROM" {
@@ -441,22 +428,20 @@ func (p *FilterParser) parseDistinctOperator(field Node) Node {
 		return field // Return field on error
 	}
 	p.nextToken() // Consume FROM
-	// Parse the value being compared
-	_ = p.parsePrimary() // Consume the value but ignore it for now
+	// Parse the value being compared against and keep it on the node so callers
+	// can evaluate "field IS [NOT] DISTINCT FROM value".
+	value := p.parsePrimary()
 
-	// Note: The DistinctNode currently only holds the field and IsNot.
-	// We might need to adjust the AST node or create a new one if
-	// the `FROM value` part is significant for evaluation.
-	// For now, just return a basic DistinctNode.
 	return &DistinctNode{
 		baseNode: baseNode{pos: pos},
 		Field:    field,
-		IsNot:    false, // NOT is handled by parseComparison
+		Value:    value,
+		IsNot:    isNot,
 	}
 }
 
 // parsePrimary parses primary expressions (literals)
-func (p *FilterParser) parsePrimary() Node {
+func (p *filterParseState) parsePrimary() Node {
 	switch p.currentToken.Type {
 	case TokenString:
 		node := &LiteralNode{

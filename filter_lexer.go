@@ -132,7 +132,6 @@ func (l *Lexer) Parse() {
 			tok = TokenComma
 		case '=':
 			tok = TokenOperatorEqual
-		case '+':
 		case '<':
 			if l.s.Peek() == '=' {
 				l.s.Scan()
