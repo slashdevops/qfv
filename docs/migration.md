@@ -32,6 +32,23 @@ produced a `UnaryOperatorNode{Operator: NOT}` wrapping the inner node (whose own
 `IsNot = true`, matching how `RegexMatchNode` already worked. `NOT LIKE` now
 produces a `BinaryOperatorNode` with `Operator = TokenOperatorNotLike`.
 
+For example, `status NOT IN ('archived')` changed shape:
+
+```mermaid
+flowchart LR
+    subgraph before["Before (v0.0.x)"]
+        direction TB
+        U["UnaryOperatorNode<br/>Operator: NOT"] --> I1["InNode<br/>IsNot: false"]
+    end
+
+    subgraph after["v0.1.0"]
+        direction TB
+        I2["InNode<br/>IsNot: true"]
+    end
+
+    before ==>|"flattened"| after
+```
+
 ```go
 // Before: type-switch had to unwrap the NOT node
 if u, ok := node.(*qfv.UnaryOperatorNode); ok && u.Operator == qfv.TokenOperatorNot {

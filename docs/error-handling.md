@@ -20,6 +20,51 @@ if err != nil {
 - `*QFVSortError` — sort parser failures
 - `*QFVFieldsError` — fields parser failures
 
+```mermaid
+classDiagram
+    class error {
+        <<interface>>
+        +Error() string
+    }
+    error <|.. QFVFilterError
+    error <|.. QFVSortError
+    error <|.. QFVFieldsError
+
+    class QFVFilterError {
+        +Field string
+        +Message string
+    }
+    class QFVSortError {
+        +Field string
+        +Message string
+    }
+    class QFVFieldsError {
+        +Field string
+        +Message string
+    }
+```
+
+## How the filter parser reports errors
+
+Unlike the sort and fields parsers — which fail fast on the first problem — the
+**filter** parser makes a single pass and keeps going after each error, so one
+call can surface several problems at once. The collected errors are combined
+with `errors.Join`.
+
+```mermaid
+flowchart TD
+    IN["FilterParser.Parse(input)"] --> LEX["lex input, then scan<br/>for ILLEGAL tokens"]
+    LEX --> EMPTY{"empty<br/>expression?"}
+    EMPTY -->|"yes"| E0["return single QFVFilterError"]
+    EMPTY -->|"no"| P["single parse pass<br/>(continues past each error)"]
+    P --> CONS{"entire input<br/>consumed?"}
+    CONS -->|"no"| ADD["add 'unexpected token' error"]
+    CONS -->|"yes"| Q
+    ADD --> Q{"len(errors) &gt; 0?"}
+    Q -->|"yes"| J["return errors.Join(…)<br/>of *QFVFilterError"]
+    Q -->|"no"| OK["return AST, nil"]
+```
+
 ## Aggregated filter errors
 
 `FilterParser.Parse` collects **every** problem in a single pass and returns
