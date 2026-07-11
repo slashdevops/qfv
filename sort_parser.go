@@ -51,12 +51,12 @@ func (n SortNode) Type() NodeType {
 
 // SortParser parses the query parameter for sorting
 type SortParser struct {
-	allowedFields map[string]any // any because don't allocate memory for struct{}
+	allowedFields map[string]struct{}
 }
 
 // NewSortParser creates a new parser with the allowed fields for sorting
 func NewSortParser(allowedFields []string) *SortParser {
-	sortFields := make(map[string]any, len(allowedFields))
+	sortFields := make(map[string]struct{}, len(allowedFields))
 
 	for _, f := range allowedFields {
 		sortFields[f] = struct{}{}

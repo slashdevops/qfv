@@ -42,8 +42,16 @@ type SimilarToNode struct {
 	IsNot   bool // true for NOT SIMILAR TO
 }
 
-func (n *SimilarToNode) Type() NodeType { return NodeTypeSimilarTo }
+func (n *SimilarToNode) Type() NodeType {
+	if n.IsNot {
+		return NodeTypeNotSimilarTo
+	}
+	return NodeTypeSimilarTo
+}
 func (n *SimilarToNode) String() string {
+	if n.IsNot {
+		return fmt.Sprintf("%s NOT SIMILAR TO %s", n.Field.String(), n.Pattern.String())
+	}
 	return fmt.Sprintf("%s SIMILAR TO %s", n.Field.String(), n.Pattern.String())
 }
 func (n *SimilarToNode) Pos() scanner.Position { return n.pos }
@@ -167,8 +175,18 @@ type IsNullNode struct {
 	IsNot bool // true for IS NOT NULL
 }
 
-func (n *IsNullNode) Type() NodeType        { return NodeTypeIsNull }
-func (n *IsNullNode) String() string        { return fmt.Sprintf("%s IS NULL", n.Field.String()) }
+func (n *IsNullNode) Type() NodeType {
+	if n.IsNot {
+		return NodeTypeIsNotNull
+	}
+	return NodeTypeIsNull
+}
+func (n *IsNullNode) String() string {
+	if n.IsNot {
+		return fmt.Sprintf("%s IS NOT NULL", n.Field.String())
+	}
+	return fmt.Sprintf("%s IS NULL", n.Field.String())
+}
 func (n *IsNullNode) Pos() scanner.Position { return n.pos }
 
 // InNode represents an IN expression (e.g., name IN ("John", "Doe"))
@@ -179,26 +197,50 @@ type InNode struct {
 	Values []Node
 }
 
-func (n *InNode) Type() NodeType { return NodeTypeIn }
+func (n *InNode) Type() NodeType {
+	if n.IsNot {
+		return NodeTypeNotIn
+	}
+	return NodeTypeIn
+}
 func (n *InNode) String() string {
 	var values []string
 	for _, v := range n.Values {
 		values = append(values, v.String())
 	}
 
-	return fmt.Sprintf("%s IN (%s)", n.Field.String(), strings.Join(values, ", "))
+	op := "IN"
+	if n.IsNot {
+		op = "NOT IN"
+	}
+	return fmt.Sprintf("%s %s (%s)", n.Field.String(), op, strings.Join(values, ", "))
 }
 func (n *InNode) Pos() scanner.Position { return n.pos }
 
-// DistinctNode represents a DISTINCT expression (e.g., name DISTINCT)
+// DistinctNode represents a DISTINCT FROM expression (e.g., name DISTINCT FROM 'John')
 type DistinctNode struct {
 	baseNode
 	Field Node
-	IsNot bool // true for NOT DISTINCT
+	Value Node // the value being compared against; nil when absent
+	IsNot bool // true for NOT DISTINCT FROM
 }
 
-func (n *DistinctNode) Type() NodeType        { return NodeTypeDistinct }
-func (n *DistinctNode) String() string        { return fmt.Sprintf("%s DISTINCT", n.Field.String()) }
+func (n *DistinctNode) Type() NodeType {
+	if n.IsNot {
+		return NodeTypeNotDistinct
+	}
+	return NodeTypeDistinct
+}
+func (n *DistinctNode) String() string {
+	op := "DISTINCT"
+	if n.IsNot {
+		op = "NOT DISTINCT"
+	}
+	if n.Value != nil {
+		return fmt.Sprintf("%s %s FROM %s", n.Field.String(), op, n.Value.String())
+	}
+	return fmt.Sprintf("%s %s", n.Field.String(), op)
+}
 func (n *DistinctNode) Pos() scanner.Position { return n.pos }
 
 // BetweenNode represents a BETWEEN expression (e.g., age BETWEEN 30 AND 40)
@@ -210,8 +252,17 @@ type BetweenNode struct {
 	IsNot bool // true for NOT BETWEEN
 }
 
-func (n *BetweenNode) Type() NodeType { return NodeTypeBetween }
+func (n *BetweenNode) Type() NodeType {
+	if n.IsNot {
+		return NodeTypeNotBetween
+	}
+	return NodeTypeBetween
+}
 func (n *BetweenNode) String() string {
-	return fmt.Sprintf("%s BETWEEN %s AND %s", n.Field.String(), n.Lower.String(), n.Upper.String())
+	op := "BETWEEN"
+	if n.IsNot {
+		op = "NOT BETWEEN"
+	}
+	return fmt.Sprintf("%s %s %s AND %s", n.Field.String(), op, n.Lower.String(), n.Upper.String())
 }
 func (n *BetweenNode) Pos() scanner.Position { return n.pos }
