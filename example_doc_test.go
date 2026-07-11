@@ -85,3 +85,51 @@ func ExampleFilterParser_errorInspection() {
 	// Output:
 	// field "secret" rejected: field not allowed
 }
+
+// ExampleWithAllowedOperatorGroups restricts the grammar to a subset of
+// operators. Anything outside the allow-list is rejected at parse time.
+func ExampleWithAllowedOperatorGroups() {
+	parser := qfv.NewFilterParser(allowed,
+		qfv.WithAllowedOperatorGroups(qfv.GroupComparison, qfv.GroupLogical),
+		qfv.WithAllowedOperators(qfv.OpIn),
+	)
+
+	if _, err := parser.Parse("age >= 18 AND email IN ('a@x.com', 'b@x.com')"); err == nil {
+		fmt.Println("comparison + IN: allowed")
+	}
+	if _, err := parser.Parse("email LIKE '%@x.com'"); err != nil {
+		fmt.Println("LIKE:", err)
+	}
+	// Output:
+	// comparison + IN: allowed
+	// LIKE: error: operator "LIKE" is not allowed
+}
+
+// ExampleWithAllowedDirections forbids DESC sorting.
+func ExampleWithAllowedDirections() {
+	parser := qfv.NewSortParser(allowed, qfv.WithAllowedDirections(qfv.SortAsc))
+
+	if _, err := parser.Parse("first_name ASC"); err == nil {
+		fmt.Println("ASC: allowed")
+	}
+	if _, err := parser.Parse("first_name DESC"); err != nil {
+		fmt.Println("DESC:", err)
+	}
+	// Output:
+	// ASC: allowed
+	// DESC: error on field 'first_name': sort direction "DESC" is not allowed
+}
+
+// ExampleFilterParser_dottedFields shows nested dot-notation field names.
+func ExampleFilterParser_dottedFields() {
+	parser := qfv.NewFilterParser([]string{"user.profile.age", "user.name"})
+
+	node, err := parser.Parse("user.profile.age >= 18 AND user.name = 'John'")
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	fmt.Println(node.String())
+	// Output:
+	// ((user.profile.age >= 18) AND (user.name = 'John'))
+}
