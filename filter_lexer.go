@@ -54,6 +54,8 @@ func (l *Lexer) Parse() {
 					tok = TokenOperatorOr
 				case "LIKE":
 					tok = TokenOperatorLike
+				case "ILIKE":
+					tok = TokenOperatorILike
 				case "IN":
 					tok = TokenOperatorIn
 				case "BETWEEN":
@@ -155,8 +157,18 @@ func (l *Lexer) Parse() {
 				tok = TokenOperatorNotEqualAlias
 				lit = "!="
 			} else if l.s.Peek() == '~' {
-				l.s.Scan() // Consume '~'
-				if l.s.Peek() == '*' {
+				l.s.Scan() // Consume first '~'
+				if l.s.Peek() == '~' {
+					l.s.Scan() // Consume second '~' -> !~~ family (NOT LIKE)
+					if l.s.Peek() == '*' {
+						l.s.Scan() // Consume '*'
+						tok = TokenOperatorNotILike
+						lit = "!~~*"
+					} else {
+						tok = TokenOperatorNotLike
+						lit = "!~~"
+					}
+				} else if l.s.Peek() == '*' {
 					l.s.Scan() // Consume '*'
 					tok = TokenOperatorNotRegexMatchCI
 					lit = "!~*"
@@ -171,7 +183,17 @@ func (l *Lexer) Parse() {
 				lit = "!" // Keep literal for error message
 			}
 		case '~':
-			if l.s.Peek() == '*' {
+			if l.s.Peek() == '~' {
+				l.s.Scan() // Consume second '~' -> ~~ family (LIKE)
+				if l.s.Peek() == '*' {
+					l.s.Scan() // Consume '*'
+					tok = TokenOperatorILike
+					lit = "~~*"
+				} else {
+					tok = TokenOperatorLike
+					lit = "~~"
+				}
+			} else if l.s.Peek() == '*' {
 				l.s.Scan() // Consume '*'
 				tok = TokenOperatorRegexMatchCI
 				lit = "~*"

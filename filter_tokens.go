@@ -38,6 +38,8 @@ const (
 	TokenOperatorNot          TokenType = "NOT"
 	TokenOperatorLike         TokenType = "LIKE"
 	TokenOperatorNotLike      TokenType = "NOT LIKE"
+	TokenOperatorILike        TokenType = "ILIKE"
+	TokenOperatorNotILike     TokenType = "NOT ILIKE"
 	TokenOperatorIn           TokenType = "IN"
 	TokenOperatorIsNotNull    TokenType = "IS NOT NULL"
 	TokenOperatorIsNull       TokenType = "IS NULL"

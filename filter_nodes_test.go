@@ -314,7 +314,7 @@ func TestDistinctNode(t *testing.T) {
 	})
 
 	t.Run("String", func(t *testing.T) {
-		expected := "fieldName DISTINCT"
+		expected := "fieldName IS DISTINCT"
 		if got := node.String(); got != expected {
 			t.Errorf("DistinctNode.String() = %v, want %v", got, expected)
 		}
