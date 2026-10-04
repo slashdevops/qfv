@@ -8,6 +8,12 @@ on:
 env:
   MAKE_STOP_ON_ERRORS: true
 
+# The job checks the code out, builds and tests it, and writes its report to
+# the step summary. It needs to read the repository and nothing else; without
+# this block the token gets whatever the repository's default grants.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
