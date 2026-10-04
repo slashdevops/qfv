@@ -103,15 +103,17 @@ A negated **predicate** is governed by its base operator, not by `OpNot`:
   are allowed whenever `OpIn` / `OpLike` / `OpBetween` / `OpSimilarTo` /
   `OpIsDistinctFrom` (respectively) are allowed.
 - `OpNot` governs only the **standalone** logical `NOT`, e.g. `NOT (age > 30)`.
+- `IS NOT DISTINCT FROM` is negated inside the `IS` predicate, not by a
+  leading `NOT`: `age NOT DISTINCT FROM 30` is refused.
 
 ```mermaid
 flowchart TD
     N["NOT appears in input"] --> K{"what follows?"}
     K -->|"( expr ) or a comparison"| U["UnaryOperatorNode<br/>governed by OpNot"]
-    K -->|"IN / LIKE / BETWEEN /<br/>SIMILAR TO / DISTINCT FROM"| P["predicate node with IsNot=true<br/>governed by the base operator"]
+    K -->|"IN / LIKE / ILIKE /<br/>BETWEEN / SIMILAR TO"| P["predicate node with IsNot=true<br/>governed by the base operator"]
 
     U -. "allow-list check" .-> gnot{"OpNot allowed?"}
-    P -. "allow-list check" .-> gbase{"OpIn / OpLike / OpBetween /<br/>OpSimilarTo / OpIsDistinctFrom allowed?"}
+    P -. "allow-list check" .-> gbase{"OpIn / OpLike / OpILike /<br/>OpBetween / OpSimilarTo allowed?"}
 ```
 
 So allowing `OpEqual` but not `OpNot` accepts `a = 1` but rejects `NOT (a = 1)`.

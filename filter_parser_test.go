@@ -494,8 +494,8 @@ func TestFilterParser_Parse(t *testing.T) {
 			wantErr:       true, // Expect error because pattern is missing
 		},
 		{
-			name:          "NOT DISTINCT FROM operator",
-			input:         "name NOT DISTINCT FROM 'John'",
+			name:          "IS NOT DISTINCT FROM operator",
+			input:         "name IS NOT DISTINCT FROM 'John'",
 			allowedFields: []string{"name"},
 			wantErr:       false,
 			checkNode: func(t *testing.T, node Node) {
