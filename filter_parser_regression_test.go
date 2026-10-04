@@ -27,18 +27,18 @@ func TestFilterParser_RejectsTrailingTokens(t *testing.T) {
 	}
 }
 
-// TestFilterParser_DistinctPreservesValue ensures DISTINCT FROM keeps the
+// TestFilterParser_DistinctPreservesValue ensures IS DISTINCT FROM keeps the
 // compared value and records negation on the node.
 func TestFilterParser_DistinctPreservesValue(t *testing.T) {
 	p := NewFilterParser([]string{"name"})
 
-	node, err := p.Parse("name IS NOT NULL AND name NOT DISTINCT FROM 'John'")
+	node, err := p.Parse("name IS NOT NULL AND name IS NOT DISTINCT FROM 'John'")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	_ = node // structure is covered in filter_parser_test.go; here we just want no error
 
-	n, err := p.Parse("name DISTINCT FROM 'John'")
+	n, err := p.Parse("name IS DISTINCT FROM 'John'")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

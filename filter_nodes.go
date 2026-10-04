@@ -19,8 +19,8 @@ const (
 	NodeTypeGroup          NodeType = "GROUP"           // (expression) ->  (name = "John" AND age > 30)
 	NodeTypeIsNull         NodeType = "IS_NULL"         // (field) -> name IS NULL
 	NodeTypeIsNotNull      NodeType = "IS_NOT_NULL"     // (field) -> name IS NOT NULL
-	NodeTypeDistinct       NodeType = "DISTINCT"        // (field) -> name DISTINCT
-	NodeTypeNotDistinct    NodeType = "NOT_DISTINCT"    // (field) -> name NOT DISTINCT
+	NodeTypeDistinct       NodeType = "DISTINCT"        // (field) -> name IS DISTINCT FROM
+	NodeTypeNotDistinct    NodeType = "NOT_DISTINCT"    // (field) -> name IS NOT DISTINCT FROM
 	NodeTypeBetween        NodeType = "BETWEEN"         // (field, lower, upper) -> age BETWEEN 30 AND 40
 	NodeTypeNotBetween     NodeType = "NOT_BETWEEN"     // (field, lower, upper) -> age NOT BETWEEN 30 AND 40
 	NodeTypeIn             NodeType = "IN"              // (field, values) -> name IN ("John", "Doe")
@@ -218,12 +218,12 @@ func (n *InNode) String() string {
 }
 func (n *InNode) Pos() scanner.Position { return n.pos }
 
-// DistinctNode represents a DISTINCT FROM expression (e.g., name DISTINCT FROM 'John')
+// DistinctNode represents an IS [NOT] DISTINCT FROM expression (e.g., name IS DISTINCT FROM 'John')
 type DistinctNode struct {
 	baseNode
 	Field Node
 	Value Node // the value being compared against; nil when absent
-	IsNot bool // true for NOT DISTINCT FROM
+	IsNot bool // true for IS NOT DISTINCT FROM
 }
 
 func (n *DistinctNode) Type() NodeType {

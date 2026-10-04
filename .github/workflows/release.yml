@@ -55,7 +55,10 @@ jobs:
         run: |
           echo "## Test Coverage" >> $GITHUB_STEP_SUMMARY
 
-          go install github.com/vladopajic/go-test-coverage/v2@latest
+          # Pinned: v2.20.0 requires Go 1.27 and this module builds with the
+          # Go of its go.mod (1.26, GOTOOLCHAIN=local). "@latest" broke the job
+          # the day that version was published. Raise it with the go directive.
+          go install github.com/vladopajic/go-test-coverage/v2@v2.19.0
 
           # execute again to get the summary
           echo "" >> $GITHUB_STEP_SUMMARY

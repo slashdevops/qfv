@@ -36,8 +36,34 @@ func NewLexer(input string) *Lexer {
 	return l
 }
 
+// asciiUpper returns s in upper case when s is written in ASCII, and s as it
+// is otherwise.
+//
+// It is how a keyword is recognised. SQL folds case in ASCII only, and
+// strings.ToUpper does not: it maps the dotless 'ı' (U+0131) to 'I' and the
+// long 'ſ' (U+017F) to 'S', so "lıke" and "Iſ" read as LIKE and IS here and
+// are a syntax error in PostgreSQL. A word with a non-ASCII letter is never a
+// keyword.
+func asciiUpper(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return s
+		}
+	}
+
+	return strings.ToUpper(s)
+}
+
+// byteOrderMark is U+FEFF. text/scanner drops one at the start of its input
+// without a token; PostgreSQL reads it as part of the first word.
+const byteOrderMark = "\uFEFF"
+
 // Parse reads all tokens from the scanner and buffers them.
 func (l *Lexer) Parse() {
+	if strings.HasPrefix(l.input, byteOrderMark) {
+		l.tokens = append(l.tokens, Token{Type: TokenIllegal, Value: byteOrderMark})
+	}
+
 	for {
 		scanTok := l.s.Scan()
 		pos := l.s.Position
@@ -53,7 +79,7 @@ func (l *Lexer) Parse() {
 			if lit == "is" {
 				tok = TokenIdentifier
 			} else {
-				upperLit := strings.ToUpper(lit)
+				upperLit := asciiUpper(lit)
 				switch upperLit {
 				case "AND":
 					tok = TokenOperatorAnd
@@ -86,10 +112,18 @@ func (l *Lexer) Parse() {
 					tok = TokenIdentifier
 				}
 			}
-		case scanner.Int:
-			tok = TokenInt
-		case scanner.Float:
-			tok = TokenFloat
+		case scanner.Int, scanner.Float:
+			tok, lit = l.numberToken(scanTok, lit)
+		case '-':
+			// A minus sign is the sign of a numeric literal when it is glued
+			// to one ("-1", "-.5"). Anything else stays illegal: the grammar
+			// has no arithmetic, and "--" opens a SQL comment.
+			tok = TokenIllegal
+
+			if next := l.s.Peek(); (next == '.' || (next >= '0' && next <= '9')) && !l.gluedToOperator(pos) {
+				numTok := l.s.Scan()
+				tok, lit = l.numberToken(numTok, "-"+l.s.TokenText())
+			}
 		case scanner.String: // Built-in scanner string (double quotes) - treat as illegal for this SQL-like syntax
 			tok = TokenIllegal
 			// For the test cases, we need to ensure the token value matches the expected format
@@ -233,6 +267,72 @@ func (l *Lexer) Parse() {
 			break
 		}
 	}
+}
+
+// numberToken classifies a number read by text/scanner, whose text is lit.
+//
+// text/scanner reads Go numbers, and those are not SQL's. It takes a
+// hexadecimal float ("0x1p-2"), prefixed integers and '_' separators, and it
+// ends a number at the first character that cannot continue it, so "1AND" is
+// the number 1 followed by the keyword AND. PostgreSQL has no hexadecimal
+// float and refuses a number with a word glued to it ("trailing junk after
+// numeric literal"), so both are illegal tokens here: an expression this
+// package accepts must be one PostgreSQL can run.
+func (l *Lexer) numberToken(scanTok rune, lit string) (TokenType, string) {
+	// A word glued to the number: consume it, so that the error names the
+	// whole of what was written.
+	if next := l.s.Peek(); next == '_' || unicode.IsLetter(next) {
+		l.s.Scan()
+
+		return TokenIllegal, lit + l.s.TokenText()
+	}
+
+	if !isDecimalNumber(lit) {
+		return TokenIllegal, lit
+	}
+
+	switch scanTok {
+	case scanner.Int:
+		return TokenInt, lit
+	case scanner.Float:
+		return TokenFloat, lit
+	}
+
+	// A sign followed by something that is not a number after all ("-.").
+	return TokenIllegal, lit
+}
+
+// isDecimalNumber reports whether lit is written with decimal digits, a
+// decimal point, an exponent and signs only. Whether it is well formed ("1e"
+// is not) is left to strconv, in the parser.
+func isDecimalNumber(lit string) bool {
+	for _, r := range lit {
+		if (r < '0' || r > '9') && !strings.ContainsRune(".eE+-", r) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// gluedToOperator reports whether the character at pos directly follows an
+// operator written with '!' or '~'.
+//
+// PostgreSQL reads the longest operator it can, and an operator that contains
+// '!' or '~' may end in '-': "a !=-1" is the unknown operator "!=-" applied to
+// 1, not "a != -1". An operator made of '=', '<' and '>' alone cannot end in
+// '-', so "a =-1" and "a <>-1" compare with minus one.
+func (l *Lexer) gluedToOperator(pos scanner.Position) bool {
+	if len(l.tokens) == 0 {
+		return false
+	}
+
+	prev := l.tokens[len(l.tokens)-1]
+	if prev.Pos.Offset+len(prev.Value) != pos.Offset {
+		return false
+	}
+
+	return strings.ContainsAny(prev.Value, "!~") && strings.Trim(prev.Value, "!~*=<>") == ""
 }
 
 // Peek returns the next token without consuming it.

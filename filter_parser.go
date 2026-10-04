@@ -62,6 +62,8 @@ type filterParseState struct {
 	lexer         *Lexer
 	currentToken  Token
 	errors        []error
+	depth         int
+	tooDeep       bool
 }
 
 // Parse parses the filter query and returns the AST
@@ -120,6 +122,12 @@ func (p *filterParseState) expect(tokenType TokenType) bool {
 
 // addError adds an error to the error list
 func (p *filterParseState) addError(err error) {
+	// Past the nesting limit the rest of the input was thrown away; what the
+	// unwinding levels then miss is not the caller's mistake.
+	if p.tooDeep {
+		return
+	}
+
 	p.errors = append(p.errors, err)
 }
 
@@ -133,6 +141,36 @@ func (p *filterParseState) requireOp(op Operator) {
 	if _, ok := p.allowedOps[op]; !ok {
 		p.addError(&QFVFilterError{Message: fmt.Sprintf("operator %q is not allowed", op)})
 	}
+}
+
+// maxFilterDepth is how deep an expression may nest: parentheses inside
+// parentheses, NOT applied to NOT. The parser is recursive, and a caller's
+// input decides how deep it recurses: 250 000 opening parentheses, 250 KB of
+// query string, ended the process with a stack overflow, which is a fatal
+// error and not a panic -- nothing recovers from it. No filter a person
+// writes is a hundred levels deep.
+const maxFilterDepth = 100
+
+// descend enters one more level of nesting and reports whether the parser
+// may go on. Past the limit it records one error and consumes the rest of
+// the input, so that the levels already entered unwind without one error
+// each.
+func (p *filterParseState) descend() bool {
+	p.depth++
+	if p.depth <= maxFilterDepth {
+		return true
+	}
+
+	if !p.tooDeep {
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("expression is nested more than %d levels deep", maxFilterDepth)})
+		p.tooDeep = true
+	}
+
+	for p.currentToken.Type != TokenEOF {
+		p.nextToken()
+	}
+
+	return false
 }
 
 // parseExpression parses an expression
@@ -189,7 +227,14 @@ func (p *filterParseState) parseComparison() Node {
 		pos := p.currentToken.Pos
 		p.requireOp(OpNot)
 		p.nextToken()
+
+		if !p.descend() {
+			return &LiteralNode{}
+		}
+
 		expr := p.parseComparison()
+		p.depth--
+
 		return &UnaryOperatorNode{
 			baseNode: baseNode{pos: pos},
 			Operator: TokenOperatorNot,
@@ -201,7 +246,14 @@ func (p *filterParseState) parseComparison() Node {
 	if p.currentToken.Type == TokenLPAREN {
 		pos := p.currentToken.Pos
 		p.nextToken()
+
+		if !p.descend() {
+			return &LiteralNode{}
+		}
+
 		expr := p.parseExpression()
+		p.depth--
+
 		if !p.expect(TokenRPAREN) {
 			p.addError(&QFVFilterError{Message: "expected closing parenthesis"})
 		}
@@ -227,7 +279,7 @@ func (p *filterParseState) parseComparison() Node {
 		// Non-standard PostgreSQL shorthands: `field ISNULL` and `field NOTNULL`.
 		// These are single identifier tokens (unlike the `IS [NOT] NULL` keywords).
 		if p.currentToken.Type == TokenIdentifier {
-			switch strings.ToUpper(p.currentToken.Value) {
+			switch asciiUpper(p.currentToken.Value) {
 			case "ISNULL":
 				pos := p.currentToken.Pos
 				p.requireOp(OpIsNull)
@@ -275,10 +327,6 @@ func (p *filterParseState) parseComparison() Node {
 		case TokenOperatorIsNull:
 			p.nextToken() // Consume IS
 			return p.parseIsPredicate(field)
-		case TokenOperatorDistinct:
-			p.requireOp(OpIsDistinctFrom)
-			p.nextToken() // Consume DISTINCT
-			return p.parseDistinctOperator(field, false)
 		case TokenOperatorSimilarTo:
 			p.requireOp(OpSimilarTo)
 			p.nextToken() // Consume SIMILAR
@@ -306,10 +354,12 @@ func (p *filterParseState) parseComparison() Node {
 				IsCaseInsensitive: opToken.Type == TokenOperatorRegexMatchCI || opToken.Type == TokenOperatorNotRegexMatchCI,
 			}
 		case TokenOperatorNot:
-			// Handle NOT operators (NOT IN, NOT BETWEEN, NOT LIKE, NOT SIMILAR TO,
-			// NOT DISTINCT FROM). Negation is recorded on the resulting node via its
-			// IsNot flag (or the NOT LIKE operator), not by wrapping in a NOT node,
-			// so that consumers get a single, self-describing node.
+			// Handle NOT operators (NOT IN, NOT BETWEEN, NOT LIKE, NOT SIMILAR TO).
+			// Negation is recorded on the resulting node via its IsNot flag (or
+			// the NOT LIKE operator), not by wrapping in a NOT node, so that
+			// consumers get a single, self-describing node. DISTINCT FROM is not
+			// among them: SQL writes it IS [NOT] DISTINCT FROM, and it is parsed
+			// with the IS predicates.
 			p.nextToken() // Consume NOT
 
 			switch p.currentToken.Type {
@@ -322,10 +372,18 @@ func (p *filterParseState) parseComparison() Node {
 				p.nextToken() // Consume BETWEEN
 				return p.parseBetweenOperator(field, true)
 			case TokenOperatorLike:
+				if !p.isKeyword("LIKE") {
+					return p.unexpectedAfterNot(field)
+				}
+
 				p.requireOp(OpLike)
 				p.nextToken() // Consume LIKE
 				return p.parseLikeOperator(field, TokenOperatorNotLike)
 			case TokenOperatorILike:
+				if !p.isKeyword("ILIKE") {
+					return p.unexpectedAfterNot(field)
+				}
+
 				p.requireOp(OpILike)
 				p.nextToken() // Consume ILIKE
 				return p.parseLikeOperator(field, TokenOperatorNotILike)
@@ -333,13 +391,8 @@ func (p *filterParseState) parseComparison() Node {
 				p.requireOp(OpSimilarTo)
 				p.nextToken() // Consume SIMILAR
 				return p.parseSimilarToOperator(field, true)
-			case TokenOperatorDistinct:
-				p.requireOp(OpIsDistinctFrom)
-				p.nextToken() // Consume DISTINCT
-				return p.parseDistinctOperator(field, true)
 			default:
-				p.addError(&QFVFilterError{Message: fmt.Sprintf("unexpected token after NOT: %s", p.currentToken.Type)})
-				return field
+				return p.unexpectedAfterNot(field)
 			}
 
 		default:
@@ -370,7 +423,7 @@ func (p *filterParseState) parseComparisonOperator(field Node) Node {
 // Expects the current token to be TO after SIMILAR was consumed.
 func (p *filterParseState) parseSimilarToOperator(field Node, isNot bool) Node {
 	pos := p.lexer.Current().Pos // Use position of SIMILAR token (already consumed)
-	if p.currentToken.Type != TokenIdentifier || strings.ToUpper(p.currentToken.Value) != "TO" {
+	if p.currentToken.Type != TokenIdentifier || asciiUpper(p.currentToken.Value) != "TO" {
 		p.addError(&QFVFilterError{Message: "expected TO after SIMILAR"})
 		return field // Return field on error
 	}
@@ -446,7 +499,7 @@ func (p *filterParseState) parseBetweenOperator(field Node, isNot bool) Node {
 	// Optional SYMMETRIC / ASYMMETRIC modifier (ASYMMETRIC is the default).
 	isSymmetric := false
 	if p.currentToken.Type == TokenIdentifier {
-		switch strings.ToUpper(p.currentToken.Value) {
+		switch asciiUpper(p.currentToken.Value) {
 		case "SYMMETRIC":
 			isSymmetric = true
 			p.nextToken()
@@ -474,6 +527,28 @@ func (p *filterParseState) parseBetweenOperator(field Node, isNot bool) Node {
 	}
 }
 
+// isKeyword reports whether the current token is written as the keyword word,
+// in any case. A token type is not enough where SQL takes the word and not its
+// symbol: LIKE and "~~" are one token type, and "NOT ~~" is not SQL.
+func (p *filterParseState) isKeyword(word string) bool {
+	return asciiUpper(p.currentToken.Value) == word
+}
+
+// unexpectedAfterNot records that what follows "field NOT" is not one of the
+// predicates NOT negates (IN, BETWEEN, LIKE, ILIKE, SIMILAR TO).
+func (p *filterParseState) unexpectedAfterNot(field Node) Node {
+	switch p.currentToken.Type {
+	case TokenOperatorLike, TokenOperatorILike:
+		// The symbol, not the keyword: naming the token type would tell the
+		// caller that LIKE is unexpected after NOT, the one spelling that is.
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("unexpected token after NOT: %s (NOT negates LIKE and ILIKE; the operators are !~~ and !~~*)", p.currentToken.Value)})
+	default:
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("unexpected token after NOT: %s", p.currentToken.Type)})
+	}
+
+	return field
+}
+
 // parseIsPredicate parses the family of IS predicates after IS was consumed:
 //
 //	IS [NOT] NULL
@@ -496,22 +571,23 @@ func (p *filterParseState) parseIsPredicate(field Node) Node {
 		p.nextToken() // Consume DISTINCT
 		return p.parseDistinctOperator(field, isNot)
 
-	case p.currentToken.Type == TokenBoolean:
-		// IS [NOT] TRUE | FALSE (TRUE/YES and FALSE/NO are lexed as booleans)
+	case p.currentToken.Type == TokenBoolean && (p.isKeyword("TRUE") || p.isKeyword("FALSE")):
+		// IS [NOT] TRUE | FALSE. YES and NO are lexed as booleans too, and are
+		// literals only: SQL has no "IS YES".
 		p.requireOp(OpBooleanTest)
 		truth := BooleanTrue
-		if v := strings.ToUpper(p.currentToken.Value); v == "FALSE" || v == "NO" {
+		if p.isKeyword("FALSE") {
 			truth = BooleanFalse
 		}
 		p.nextToken() // Consume TRUE/FALSE
 		return &BooleanTestNode{baseNode: baseNode{pos: pos}, Field: field, Value: truth, IsNot: isNot}
 
-	case p.currentToken.Type == TokenIdentifier && strings.ToUpper(p.currentToken.Value) == "NULL":
+	case p.currentToken.Type == TokenIdentifier && asciiUpper(p.currentToken.Value) == "NULL":
 		p.requireOp(OpIsNull)
 		p.nextToken() // Consume NULL
 		return &IsNullNode{baseNode: baseNode{pos: pos}, Field: field, IsNot: isNot}
 
-	case p.currentToken.Type == TokenIdentifier && strings.ToUpper(p.currentToken.Value) == "UNKNOWN":
+	case p.currentToken.Type == TokenIdentifier && asciiUpper(p.currentToken.Value) == "UNKNOWN":
 		p.requireOp(OpBooleanTest)
 		p.nextToken() // Consume UNKNOWN
 		return &BooleanTestNode{baseNode: baseNode{pos: pos}, Field: field, Value: BooleanUnknown, IsNot: isNot}
@@ -530,7 +606,7 @@ func (p *filterParseState) parseIsPredicate(field Node) Node {
 func (p *filterParseState) parseDistinctOperator(field Node, isNot bool) Node {
 	pos := p.lexer.Current().Pos // Use position of DISTINCT token (already consumed)
 	// Expect FROM (treated as identifier by lexer)
-	if p.currentToken.Type != TokenIdentifier || strings.ToUpper(p.currentToken.Value) != "FROM" {
+	if p.currentToken.Type != TokenIdentifier || asciiUpper(p.currentToken.Value) != "FROM" {
 		p.addError(&QFVFilterError{Message: "expected FROM after DISTINCT"})
 		return field // Return field on error
 	}
@@ -589,7 +665,7 @@ func (p *filterParseState) parsePrimary() Node {
 		return node
 
 	case TokenBoolean:
-		val := strings.ToUpper(p.currentToken.Value) == "TRUE" || strings.ToUpper(p.currentToken.Value) == "YES"
+		val := asciiUpper(p.currentToken.Value) == "TRUE" || asciiUpper(p.currentToken.Value) == "YES"
 		node := &LiteralNode{
 			baseNode: baseNode{pos: p.currentToken.Pos},
 			Value:    val,

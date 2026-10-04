@@ -137,7 +137,7 @@ func (p *SortParser) Parse(input string) (SortNode, error) {
 		}
 
 		if len(sortParts) > 1 {
-			dirStr := strings.ToUpper(sortParts[1])
+			dirStr := asciiUpper(sortParts[1])
 
 			switch dirStr {
 			case SortDesc.String():

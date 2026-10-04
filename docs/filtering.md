@@ -76,6 +76,50 @@ binds tighter than `OR`.
 **Literals**: single-quoted strings (`''` escapes a quote), integers, floats,
 and booleans (`TRUE`/`FALSE`/`YES`/`NO`).
 
+### Numbers
+
+A number is a decimal literal, with an optional minus sign **glued to it**:
+`42`, `-1`, `3.14`, `-.5`, `1.`, `1e5`, `-1e-5`. The sign is part of the
+literal wherever a literal is taken (`id IN (-1, 2)`, `age BETWEEN -5 AND 5`,
+`n IS DISTINCT FROM -1`); the grammar has no arithmetic, so `- 1` (with a
+space), `1-1`, `+1` and `-name` are refused.
+
+The parser refuses what PostgreSQL refuses, so that an accepted expression
+can be spliced into a `WHERE` clause:
+
+| Input | Why it is refused |
+| --- | --- |
+| `id = 1AND name = 'x'` | a word glued to a number: PostgreSQL's "trailing junk after numeric literal". (`name = 'x'AND id = 1` is fine: a string ends at its quote.) |
+| `price = 0x1p-2` | a hexadecimal float is a Go literal, not a SQL one |
+| `id !=-1`, `name ~~-1`, `name ~~*-1`, `name !~-1` | PostgreSQL reads the longest operator, and one written with `!` or `~` may end in `-`: this is the unknown operator `!=-`. Write `id != -1`. (`id =-1`, `id <>-1` and `id >=-1` are fine.) |
+| `id = --1`, `id = 1--` | `--` opens a SQL comment |
+| `id = 1e` | an exponent with no digits |
+
+It is also stricter than PostgreSQL on purpose: `0x10`, `0b101`, `0o17`,
+`1_000` and `1_000.5` are numbers in PostgreSQL 16 and later and are refused
+here. A number is written with decimal digits, a point and an exponent, and
+nothing else.
+
+### Keywords, and what bounds an expression
+
+- **A keyword is ASCII, in any case.** `like`, `Like` and `LIKE` are the
+  keyword; `lıke` (a dotless `ı`) and `Iſ` (a long `ſ`) are not, although
+  Unicode upper-cases those two letters to `I` and `S`. PostgreSQL folds
+  case in ASCII only and reads them as names.
+- **An expression does not start with a byte order mark** (U+FEFF).
+- **Nesting is at most 100 levels deep**: parentheses inside parentheses,
+  `NOT` applied to `NOT`. The parser is recursive and the input decides how
+  deep it recurses; without a bound, a quarter of a megabyte of `(` ends the
+  process with a stack overflow, which no `recover` catches. A long flat
+  expression (`a = 1 AND b = 2 AND …`) is not nested and is not limited by
+  this. **Bound the length of what you hand to `Parse`** as well: the parser
+  reads its whole input before it answers.
+
+**The parser does not know a column's type.** `name LIKE -1`, `id = 'x'` and a
+bare `-1` are accepted, and PostgreSQL refuses each for its type, not for its
+syntax. What this page promises is that an accepted expression is not a
+syntax error; a caller still has to answer for a value of the wrong type.
+
 ## Nested (dot-notation) field names
 
 Field names may contain dots, so you can allow-list and filter on nested paths:
@@ -109,6 +153,14 @@ flowchart LR
     N -. "shorthands" .- SH["field ISNULL / NOTNULL<br/>→ IsNullNode"]
 ```
 
+`IS` is the only way in. `id DISTINCT FROM 1` and `id NOT DISTINCT FROM 1`,
+without `IS`, are not SQL and are refused; so is `active IS YES`. `YES` and
+`NO` are this parser's spellings of a boolean **literal** and not truth values
+of the `IS` test. They are not PostgreSQL's either: `active = YES` parses to a
+`LiteralNode` whose `Value` is `true` and which renders as `true`, but the
+text `YES` spliced into SQL is read as a column name. Write `TRUE`/`FALSE`
+where the input itself is spliced.
+
 ## Worked examples
 
 ```go
@@ -124,12 +176,14 @@ flowchart LR
 "age > 30"
 "age <> 30"   // not equal
 "age != 30"   // not equal (alias)
+"balance < -10.5"  // a sign glued to the number
 
 // Pattern matching
 "first_name LIKE 'J%'"
 "first_name NOT LIKE 'J%'"
 "first_name ILIKE 'j%'"            // case-insensitive
 "first_name NOT ILIKE 'j%'"
+"first_name !~~ 'J%'"              // NOT LIKE, as an operator ("NOT ~~" is not SQL)
 "name SIMILAR TO 'J%n'"            // SQL-standard regex
 "name NOT SIMILAR TO 'J%n'"
 

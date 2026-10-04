@@ -1,5 +1,60 @@
 # Migration Guide
 
+## v1.0.2 → v1.0.3
+
+`v1.0.3` makes the filter parser refuse what PostgreSQL refuses as a syntax
+error. A caller that passed one of these inputs through now gets the parser's
+error instead of the database's.
+
+| Input | v1.0.2 | v1.0.3 | PostgreSQL 18 |
+| --- | --- | --- | --- |
+| `id DISTINCT FROM 1`, `id NOT DISTINCT FROM 1` | ✅ accepted | ❌ error | syntax error: write `IS [NOT] DISTINCT FROM` |
+| `price = 0x1p-2` (a hexadecimal float) | ✅ accepted | ❌ error | trailing junk after numeric literal |
+| `id=1AND name='x'` (a word glued to a number) | ✅ accepted | ❌ error | trailing junk after numeric literal |
+| `active IS YES`, `active IS NOT NO` | ✅ accepted | ❌ error | syntax error: `IS` takes `TRUE`, `FALSE`, `UNKNOWN`, `NULL` |
+| `name NOT ~~ 'x'`, `name NOT ~~* 'x'` | ✅ accepted | ❌ error | syntax error: write `NOT LIKE` or `!~~` |
+
+Three more refusals, of input no client writes by accident:
+
+| Input | v1.0.2 | v1.0.3 |
+| --- | --- | --- |
+| a keyword spelled with a non-ASCII letter (`name lıke 'x'`, `id Iſ NULL`, `name aſc` in a sort) | ✅ accepted | ❌ error: PostgreSQL folds case in ASCII only, and reads these as names |
+| an expression that starts with a byte order mark (U+FEFF) | ✅ accepted, the mark dropped | ❌ error |
+| an expression nested more than 100 levels deep (`((((…`, `NOT NOT NOT …`) | ✅ accepted, or **the process ended**: about 250 000 opening parentheses overflow the stack, a fatal error no `recover` catches | ❌ error |
+
+The last one is a reason to upgrade whatever else you do, if the expression
+comes from a request: bound its length before calling `Parse`, too.
+
+**One input that ran is now refused:** a float written with `_` separators
+(`price = 1_000.5`, `1e1_0`). v1.0.2 refused the integer form (`1_000`) and
+accepted the float by accident of how each was converted; PostgreSQL 16 and
+later run both. A number is now decimal digits, a point and an exponent, for
+integers and floats alike. Write `1000.5`.
+
+**One input that was refused is now accepted:** a negative number.
+
+| Input | v1.0.2 | v1.0.3 |
+| --- | --- | --- |
+| `id = -1`, `id IN (-1, 2)`, `age BETWEEN -5 AND 5` | ❌ error | ✅ accepted |
+
+The sign is part of the literal: `LiteralNode.Text` is `-1` and `Value` is
+`int64(-1)`. It must be glued to the number, and not to an operator written
+with `!` or `~`: `id !=-1` is refused, because PostgreSQL reads `!=-` as one
+operator. The parser still does not know a column's type, so a negative
+number is accepted wherever a literal is (`name LIKE -1`, a bare `-1`), as a
+positive one already was; PostgreSQL refuses those for their type. See
+[Filtering › Numbers](filtering.md#numbers).
+
+**Error messages and tokens.** For an input that was and is refused, the text
+can differ: `0x10`, `0b101`, `0o17` and `1_000` are `illegal token` (it was
+`invalid integer`), and a word glued to a number is one illegal token named
+whole (`error on field '1name': illegal token`). `Lexer` users: `-` followed
+by a digit or a point is no longer its own illegal token but the start of an
+`INT` or `FLOAT` whose `Value` carries the sign.
+
+**Migration:** replace `x [NOT] DISTINCT FROM y` with `x IS [NOT] DISTINCT FROM
+y`, and write numbers without `_`.
+
 ## v0.0.x → v0.1.0
 
 `v0.1.0` fixes correctness bugs in the filter parser, adds the PostgreSQL 18
