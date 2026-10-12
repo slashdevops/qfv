@@ -1,6 +1,6 @@
 # Migration Guide
 
-## v1.0.3 → the next release
+## v1.0.3 → v1.0.4
 
 Three places where the filter parser and PostgreSQL disagreed about an
 input. Each row was run against PostgreSQL 18; what the pattern operators
@@ -9,14 +9,14 @@ take is from its manual,
 
 **Refused now, and accepted before:**
 
-| Input | v1.0.3 | Now | PostgreSQL 18 |
+| Input | v1.0.3 | v1.0.4 | PostgreSQL 18 |
 | --- | --- | --- | --- |
 | a number or a boolean as a pattern: `name LIKE 1`, `name NOT ILIKE -1`, `name ~~ 1`, `name SIMILAR TO 1`, `name LIKE TRUE` | ✅ accepted | ❌ error: `expected string pattern for operator LIKE, got LITERAL` | `operator does not exist: text ~~ integer`, for every column type |
 | `YES` and `NO` as boolean literals: `active = YES`, `active <> no`, `active IN (yes, no)` | ✅ accepted, as `true` and `false` | ❌ error | a name: the comparison is with a column called `yes`, or `column "yes" does not exist` |
 
 **Accepted now, and refused before:**
 
-| Input | v1.0.3 | Now | PostgreSQL 18 |
+| Input | v1.0.3 | v1.0.4 | PostgreSQL 18 |
 | --- | --- | --- | --- |
 | `IS` in lower case: `id is null`, `id is not null`, `id is distinct from 1`, `active is true` | ❌ error (`Is`, `iS` and `IS` were accepted) | ✅ accepted | runs |
 | a field called `yes` or `no`, when it is in the allow-list: `yes = 1` | ❌ error | ✅ accepted | runs |
