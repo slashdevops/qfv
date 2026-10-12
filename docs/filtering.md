@@ -74,7 +74,36 @@ binds tighter than `OR`.
 | Grouping | `( ... )` |
 
 **Literals**: single-quoted strings (`''` escapes a quote), integers, floats,
-and booleans (`TRUE`/`FALSE`/`YES`/`NO`).
+and the two booleans SQL has, `TRUE` and `FALSE`. `YES` and `NO` are not
+literals: PostgreSQL reads them as names, and so does this parser (a field
+may be called `yes`).
+
+### Patterns
+
+What the pattern operators take is PostgreSQL's, from its manual,
+[9.7. Pattern Matching](https://www.postgresql.org/docs/current/functions-matching.html):
+
+```text
+string LIKE pattern [ESCAPE escape-character]
+string SIMILAR TO pattern [ESCAPE escape-character]
+text ~ text → boolean
+```
+
+`ILIKE` is `LIKE` without regard to case, and `~~`, `~~*`, `!~~` and `!~~*`
+are the operators PostgreSQL translates `LIKE`, `ILIKE` and their negations
+to.
+
+- **A pattern is a string literal**, for every one of them: `name LIKE 'x%'`,
+  `name ~~* 'X%'`, `name SIMILAR TO '(x|y)%'`, `name ~ '^x'`. A number or a
+  boolean there is refused (`name LIKE 1`, `name SIMILAR TO TRUE`):
+  PostgreSQL has no `~~` that takes one, whatever the column's type is, and
+  answers "operator does not exist". A number written as a string is a
+  pattern: `name LIKE '1'`.
+- **The `ESCAPE` clause is not supported**; `name LIKE 'x!%' ESCAPE '!'` is
+  refused. A pattern is written with the default escape character, the
+  backslash, which a string literal keeps as it is: `name LIKE '100\%'`.
+- **What is in the pattern is not looked at**: see
+  "Patterns are not compiled", under [AST nodes](#ast-nodes).
 
 ### Numbers
 
@@ -115,9 +144,10 @@ nothing else.
   this. **Bound the length of what you hand to `Parse`** as well: the parser
   reads its whole input before it answers.
 
-**The parser does not know a column's type.** `name LIKE -1`, `id = 'x'` and a
+**The parser does not know a column's type.** `name = -1`, `id = 'x'` and a
 bare `-1` are accepted, and PostgreSQL refuses each for its type, not for its
-syntax. What this page promises is that an accepted expression is not a
+syntax. (A pattern is the exception, because it has one type for every
+column: see [Patterns](#patterns).) What this page promises is that an accepted expression is not a
 syntax error; a caller still has to answer for a value of the wrong type.
 
 ## Nested (dot-notation) field names
@@ -154,12 +184,12 @@ flowchart LR
 ```
 
 `IS` is the only way in. `id DISTINCT FROM 1` and `id NOT DISTINCT FROM 1`,
-without `IS`, are not SQL and are refused; so is `active IS YES`. `YES` and
-`NO` are this parser's spellings of a boolean **literal** and not truth values
-of the `IS` test. They are not PostgreSQL's either: `active = YES` parses to a
-`LiteralNode` whose `Value` is `true` and which renders as `true`, but the
-text `YES` spliced into SQL is read as a column name. Write `TRUE`/`FALSE`
-where the input itself is spliced.
+without `IS`, are not SQL and are refused; so is `active IS YES`: the truth
+values of the `IS` test are `TRUE`, `FALSE` and `UNKNOWN`.
+
+`IS` is the keyword in any case, as every keyword is: `id is null`,
+`id Is Not Null` and `active is true` are the same tests as their upper-case
+spellings.
 
 ## Worked examples
 
