@@ -1,5 +1,39 @@
 # Migration Guide
 
+## v1.0.3 → the next release
+
+Three places where the filter parser and PostgreSQL disagreed about an
+input. Each row was run against PostgreSQL 18; what the pattern operators
+take is from its manual,
+[9.7. Pattern Matching](https://www.postgresql.org/docs/current/functions-matching.html).
+
+**Refused now, and accepted before:**
+
+| Input | v1.0.3 | Now | PostgreSQL 18 |
+| --- | --- | --- | --- |
+| a number or a boolean as a pattern: `name LIKE 1`, `name NOT ILIKE -1`, `name ~~ 1`, `name SIMILAR TO 1`, `name LIKE TRUE` | ✅ accepted | ❌ error: `expected string pattern for operator LIKE, got LITERAL` | `operator does not exist: text ~~ integer`, for every column type |
+| `YES` and `NO` as boolean literals: `active = YES`, `active <> no`, `active IN (yes, no)` | ✅ accepted, as `true` and `false` | ❌ error | a name: the comparison is with a column called `yes`, or `column "yes" does not exist` |
+
+**Accepted now, and refused before:**
+
+| Input | v1.0.3 | Now | PostgreSQL 18 |
+| --- | --- | --- | --- |
+| `IS` in lower case: `id is null`, `id is not null`, `id is distinct from 1`, `active is true` | ❌ error (`Is`, `iS` and `IS` were accepted) | ✅ accepted | runs |
+| a field called `yes` or `no`, when it is in the allow-list: `yes = 1` | ❌ error | ✅ accepted | runs |
+
+The POSIX operators (`~`, `~*`, `!~`, `!~*`) already took a string and
+nothing else, and the `ESCAPE` clause is still not part of the grammar.
+
+**For callers that walk the tree.** A `LiteralNode` of `Kind`
+`reflect.Bool` now comes from `TRUE` or `FALSE` only, and the right side of a
+`LIKE`/`ILIKE` `BinaryOperatorNode` and a `SimilarToNode`'s `Pattern` are
+always a string `LiteralNode`. `Lexer` users: `is` in lower case is the `IS`
+token like every other spelling, and `YES`/`NO` are `IDENTIFIER` tokens.
+
+**Migration:** write `TRUE` and `FALSE`; quote a pattern (`name LIKE '1'`).
+A field that was called `is` cannot be filtered on, as it cannot be named
+unquoted in PostgreSQL.
+
 ## v1.0.2 → v1.0.3
 
 `v1.0.3` makes the filter parser refuse what PostgreSQL refuses as a syntax

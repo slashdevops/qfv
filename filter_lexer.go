@@ -74,43 +74,43 @@ func (l *Lexer) Parse() {
 		case scanner.EOF:
 			tok = TokenEOF
 		case scanner.Ident:
-			// Special handling for the "is" token in the test cases
-			// In the test cases, "is" is expected to be an identifier, not a keyword
-			if lit == "is" {
+			// A keyword is a keyword in any case, IS included: PostgreSQL
+			// folds an unquoted word, and "id is null" is the same test as
+			// "id IS NULL". The lower-case word used to be kept back as an
+			// identifier, for a test that tokenized English.
+			switch asciiUpper(lit) {
+			case "AND":
+				tok = TokenOperatorAnd
+			case "OR":
+				tok = TokenOperatorOr
+			case "LIKE":
+				tok = TokenOperatorLike
+			case "ILIKE":
+				tok = TokenOperatorILike
+			case "IN":
+				tok = TokenOperatorIn
+			case "BETWEEN":
+				tok = TokenOperatorBetween
+			case "DISTINCT":
+				tok = TokenOperatorDistinct
+			case "SIMILAR":
+				tok = TokenOperatorSimilarTo // Treat SIMILAR as its own token
+			case "TO":
+				tok = TokenIdentifier // Treat TO as a generic identifier for now, parser will handle context
+			case "IS":
+				tok = TokenOperatorIsNull // Treat IS as its own token
+			case "NOT":
+				tok = TokenOperatorNot // Treat NOT as its own token
+			case "TRUE", "FALSE":
+				// The two boolean literals SQL has. YES and NO were read as
+				// booleans too, and are names to PostgreSQL: "active = YES"
+				// is a comparison with a column called yes.
+				tok = TokenBoolean
+			case "NULL":
+				tok = TokenIdentifier // Treat NULL as an identifier
+			default:
+				// Check if it's a potential field name or other identifier
 				tok = TokenIdentifier
-			} else {
-				upperLit := asciiUpper(lit)
-				switch upperLit {
-				case "AND":
-					tok = TokenOperatorAnd
-				case "OR":
-					tok = TokenOperatorOr
-				case "LIKE":
-					tok = TokenOperatorLike
-				case "ILIKE":
-					tok = TokenOperatorILike
-				case "IN":
-					tok = TokenOperatorIn
-				case "BETWEEN":
-					tok = TokenOperatorBetween
-				case "DISTINCT":
-					tok = TokenOperatorDistinct
-				case "SIMILAR":
-					tok = TokenOperatorSimilarTo // Treat SIMILAR as its own token
-				case "TO":
-					tok = TokenIdentifier // Treat TO as a generic identifier for now, parser will handle context
-				case "IS":
-					tok = TokenOperatorIsNull // Treat IS as its own token
-				case "NOT":
-					tok = TokenOperatorNot // Treat NOT as its own token
-				case "TRUE", "FALSE", "YES", "NO":
-					tok = TokenBoolean
-				case "NULL":
-					tok = TokenIdentifier // Treat NULL as an identifier
-				default:
-					// Check if it's a potential field name or other identifier
-					tok = TokenIdentifier
-				}
 			}
 		case scanner.Int, scanner.Float:
 			tok, lit = l.numberToken(scanTok, lit)

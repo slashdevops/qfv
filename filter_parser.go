@@ -428,7 +428,13 @@ func (p *filterParseState) parseSimilarToOperator(field Node, isNot bool) Node {
 		return field // Return field on error
 	}
 	p.nextToken() // Consume TO
-	pattern := p.parsePrimary()
+
+	operator := TokenOperatorSimilarTo
+	if isNot {
+		operator = TokenOperatorNotSimilarTo
+	}
+
+	pattern := p.parsePattern(operator)
 	return &SimilarToNode{
 		baseNode: baseNode{pos: pos},
 		Field:    field,
@@ -437,13 +443,34 @@ func (p *filterParseState) parseSimilarToOperator(field Node, isNot bool) Node {
 	}
 }
 
+// parsePattern reads the right side of LIKE, ILIKE and SIMILAR TO, negated or
+// not, and of the ~~ operators that are their other spelling.
+//
+// PostgreSQL writes them "string LIKE pattern [ESCAPE escape-character]" and
+// "string SIMILAR TO pattern", and a pattern is a string: with a number or a
+// boolean there it answers "operator does not exist", whatever the column's
+// type is, because no ~~ takes one. So a literal of another kind is refused
+// here, as it already was for the POSIX operators (~, ~*, !~, !~*).
+//
+// The ESCAPE clause is not part of this grammar: a pattern is written with
+// the default escape character, the backslash.
+func (p *filterParseState) parsePattern(operator TokenType) Node {
+	pattern := p.parsePrimary()
+
+	if literal, ok := pattern.(*LiteralNode); !ok || literal.Kind != reflect.String {
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("expected string pattern for operator %s, got %s", operator, pattern.Type())})
+	}
+
+	return pattern
+}
+
 // parseLikeOperator parses a LIKE/ILIKE/NOT LIKE/NOT ILIKE operator.
 // Expects the current token to be the pattern after the operator was consumed.
 // operator is one of TokenOperatorLike, TokenOperatorILike, TokenOperatorNotLike,
 // or TokenOperatorNotILike.
 func (p *filterParseState) parseLikeOperator(field Node, operator TokenType) Node {
 	pos := p.lexer.Current().Pos // Use position of the operator token (already consumed)
-	pattern := p.parsePrimary()
+	pattern := p.parsePattern(operator)
 	return &BinaryOperatorNode{
 		baseNode: baseNode{pos: pos},
 		Left:     field,
@@ -572,8 +599,7 @@ func (p *filterParseState) parseIsPredicate(field Node) Node {
 		return p.parseDistinctOperator(field, isNot)
 
 	case p.currentToken.Type == TokenBoolean && (p.isKeyword("TRUE") || p.isKeyword("FALSE")):
-		// IS [NOT] TRUE | FALSE. YES and NO are lexed as booleans too, and are
-		// literals only: SQL has no "IS YES".
+		// IS [NOT] TRUE | FALSE.
 		p.requireOp(OpBooleanTest)
 		truth := BooleanTrue
 		if p.isKeyword("FALSE") {
@@ -665,7 +691,7 @@ func (p *filterParseState) parsePrimary() Node {
 		return node
 
 	case TokenBoolean:
-		val := asciiUpper(p.currentToken.Value) == "TRUE" || asciiUpper(p.currentToken.Value) == "YES"
+		val := asciiUpper(p.currentToken.Value) == "TRUE"
 		node := &LiteralNode{
 			baseNode: baseNode{pos: p.currentToken.Pos},
 			Value:    val,

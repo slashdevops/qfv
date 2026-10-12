@@ -147,7 +147,7 @@ func TestParsePrimaryLiteralKinds(t *testing.T) {
 		"score = 3.14":   reflect.Float64,
 		"active = true":  reflect.Bool,
 		"active = false": reflect.Bool,
-		"active = YES":   reflect.Bool,
+		"active = TRUE":  reflect.Bool,
 	}
 	for in, wantKind := range cases {
 		t.Run(in, func(t *testing.T) {

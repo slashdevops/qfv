@@ -56,7 +56,7 @@ func TestLexer_Navigation(t *testing.T) {
 				{Pos: scanner.Position{Line: 1, Column: 1}, Type: TokenIdentifier, Value: "comment"},
 				{Pos: scanner.Position{Line: 1, Column: 9}, Type: TokenOperatorEqual, Value: "="},
 				{Pos: scanner.Position{Line: 1, Column: 11}, Type: TokenIdentifier, Value: "This"},
-				{Pos: scanner.Position{Line: 1, Column: 16}, Type: TokenIdentifier, Value: "is"},
+				{Pos: scanner.Position{Line: 1, Column: 16}, Type: TokenOperatorIsNull, Value: "is"}, // IS, in any case
 				{Pos: scanner.Position{Line: 1, Column: 19}, Type: TokenIdentifier, Value: "a"},
 				{Pos: scanner.Position{Line: 1, Column: 21}, Type: TokenIdentifier, Value: "bad"},
 				{Pos: scanner.Position{Line: 1, Column: 25}, Type: TokenIdentifier, Value: "string"},
@@ -71,7 +71,7 @@ func TestLexer_Navigation(t *testing.T) {
 				{Pos: scanner.Position{Line: 1, Column: 1}, Type: TokenIdentifier, Value: "comment"},
 				{Pos: scanner.Position{Line: 1, Column: 9}, Type: TokenOperatorEqual, Value: "="},
 				{Pos: scanner.Position{Line: 1, Column: 11}, Type: TokenIdentifier, Value: "This"},
-				{Pos: scanner.Position{Line: 1, Column: 16}, Type: TokenIdentifier, Value: "is"},
+				{Pos: scanner.Position{Line: 1, Column: 16}, Type: TokenOperatorIsNull, Value: "is"}, // IS, in any case
 				{Pos: scanner.Position{Line: 1, Column: 19}, Type: TokenIdentifier, Value: "a"},
 				{Pos: scanner.Position{Line: 1, Column: 21}, Type: TokenIdentifier, Value: "bad"},
 				{Pos: scanner.Position{Line: 1, Column: 25}, Type: TokenIdentifier, Value: "string"},

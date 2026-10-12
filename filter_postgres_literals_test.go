@@ -383,12 +383,6 @@ func TestFilterParser_KeywordsAreASCII(t *testing.T) {
 	// The same words in ASCII, in any case, are the keywords.
 	for _, input := range []string{"name like 'x'", "id In (1)", "id Is nUlL", "active IS false", "name similar To 'x'", "id is distinct from 1"} {
 		t.Run(input, func(t *testing.T) {
-			if input == "id is distinct from 1" || input == "id Is nUlL" {
-				// "is" in lower case is an older special case of the lexer and
-				// is refused; it is not this test's subject.
-				input = strings.Replace(input, "is ", "IS ", 1)
-			}
-
 			if _, err := NewFilterParser(allowed).Parse(input); err != nil {
 				t.Fatalf("Parse(%q): %v", input, err)
 			}
