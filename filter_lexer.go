@@ -142,9 +142,11 @@ func (l *Lexer) Parse() {
 					// Found a quote. Is it an escaped quote ('') or the end?
 					if l.s.Peek() == '\'' {
 						// It's an escaped quote ('') according to SQL standard
-						l.s.Next()         // Consume the second quote from the input stream
-						sb.WriteRune('\'') // Append a single literal quote to the value
-						sb.WriteRune('\'') // Append another quote to match the expected format
+						l.s.Next() // Consume the second quote from the input stream
+						// Both quotes are kept, as the value is written in SQL.
+						// A strings.Builder's writes never fail; their error is
+						// discarded on purpose.
+						_, _ = sb.WriteString("''")
 					} else {
 						// It's the closing quote
 						break // Exit the loop, string successfully parsed
@@ -152,7 +154,7 @@ func (l *Lexer) Parse() {
 				} else {
 					// Regular character within the string
 					// Note: Standard Go escapes like \n are not handled here, only '' for quote escape.
-					sb.WriteRune(char)
+					_, _ = sb.WriteRune(char)
 				}
 			}
 
