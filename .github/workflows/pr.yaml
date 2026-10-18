@@ -14,6 +14,15 @@ env:
 permissions:
   contents: read
 
+# Every step runs with "shell: bash", which GitHub runs as
+# "bash --noprofile --norc -eo pipefail {0}". The default for a step that
+# names no shell is "bash -e {0}", without pipefail: "go test ... | tee"
+# and "go-test-coverage ... | sed ... | tee" took tee's status, so a failing
+# test or a coverage below its threshold passed the job.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     runs-on: ubuntu-latest
