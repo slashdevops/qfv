@@ -7,7 +7,10 @@
 // what the SQL it will run as accepts: by default PostgreSQL 18's grammar, as
 // PostgreSQL 18 runs it; with WithDialect(DialectSQLStandard), the SQL
 // standard's (ISO/IEC 9075:2023), which refuses PostgreSQL's own spellings
-// such as != and ILIKE. WithAllowedOperators and WithAllowedOperatorGroups
+// such as != and ILIKE; with WithDialect(DialectMySQL), MySQL 8.4's, which
+// reads strings with MySQL's backslash escapes, as MySQL does, so that a
+// filter cannot hide a predicate from the allow-list. WithAllowedOperators
+// and WithAllowedOperatorGroups
 // narrow the operators further. docs/dialects.md explains the dialects.
 //
 // Every parser is safe for concurrent use. The documentation, with the full

@@ -13,10 +13,20 @@ type Lexer struct {
 	inputLen int
 	pos      int
 	tokens   []Token
+	// backslashEscapes is whether a backslash in a string escapes the
+	// character after it (MySQL 8.4's default), or is a character like any
+	// other (PostgreSQL 18, the SQL standard).
+	backslashEscapes bool
 }
 
-// NewLexer creates a new lexer
+// NewLexer creates a new lexer that reads strings as PostgreSQL 18 does: a
+// backslash in a string is a character like any other.
 func NewLexer(input string) *Lexer {
+	return newLexer(input, DialectPostgreSQL)
+}
+
+// newLexer creates a lexer that reads strings as the dialect does.
+func newLexer(input string, dialect Dialect) *Lexer {
 	var s scanner.Scanner
 	s.Init(strings.NewReader(input))
 	// Customize scanner: recognize identifiers, numbers, strings.
@@ -30,7 +40,7 @@ func NewLexer(input string) *Lexer {
 		return ch == '_' || unicode.IsLetter(ch) || (i > 0 && (unicode.IsDigit(ch) || ch == '.'))
 	}
 
-	l := &Lexer{s: s, input: input, pos: -1} // Start at -1, first Next moves to 0
+	l := &Lexer{s: s, input: input, pos: -1, backslashEscapes: dialect.backslashEscapes()} // Start at -1, first Next moves to 0
 	l.inputLen = len(input)
 
 	return l
@@ -138,6 +148,18 @@ func (l *Lexer) Parse() {
 					// Reached EOF without closing quote
 					isValid = false
 					break // Exit loop
+				} else if char == '\\' && l.backslashEscapes {
+					// MySQL 8.4: the backslash escapes the character after
+					// it, a quote included, and both are kept as written. A
+					// string that ends on its backslash is not closed.
+					escaped := l.s.Next()
+					if escaped == scanner.EOF {
+						isValid = false
+						break
+					}
+
+					_, _ = sb.WriteRune(char)
+					_, _ = sb.WriteRune(escaped)
 				} else if char == '\'' {
 					// Found a quote. Is it an escaped quote ('') or the end?
 					if l.s.Peek() == '\'' {

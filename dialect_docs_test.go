@@ -7,10 +7,12 @@ import (
 	"testing"
 )
 
-// docs/dialects.md quotes, word for word, what Parse answers in the SQL:2023
-// dialect. A message that changes here and not there would leave the page
-// telling clients to look for an error they never get, so each row of its
-// table is parsed and held to the parser.
+// docs/dialects.md quotes, word for word, what Parse answers in each dialect.
+// A message that changes here and not there would leave the page telling
+// clients to look for an error they never get, so each row of its tables is
+// parsed and held to the parser: the "### SQL:2023" table in the SQL standard
+// dialect, the "### MySQL 8.4" one in MySQL's. A row that names an allow-list
+// ("with the allow-list `["name"]`") is parsed with it.
 func TestTheDialectsPageQuotesTheParser(t *testing.T) {
 	t.Parallel()
 
@@ -31,30 +33,52 @@ func TestTheDialectsPageQuotesTheParser(t *testing.T) {
 		section = section[:end+1]
 	}
 
-	row := regexp.MustCompile("(?m)^\\| (`[^|]+`(?:, `[^|]+`)*) \\| `([^`]+)` \\|$")
+	row := regexp.MustCompile("(?m)^\\| (`[^|]+`(?:, `[^|]+`)*) \\| `([^`]+)`(?: \\(with the allow-list `\\[([^]]*)\\]`\\))? \\|$")
 	code := regexp.MustCompile("`([^`]+)`")
-	parser := NewFilterParser([]string{"id", "name"}, WithDialect(DialectSQLStandard))
+	quoted := regexp.MustCompile(`"([^"]+)"`)
 
-	checked := 0
+	dialects := map[string]Dialect{"SQL:2023": DialectSQLStandard, "MySQL 8.4": DialectMySQL}
+	checked := map[string]int{}
 
-	for _, m := range row.FindAllStringSubmatch(section, -1) {
-		for _, input := range code.FindAllStringSubmatch(m[1], -1) {
-			checked++
+	for _, table := range strings.Split(section, "\n### ")[1:] {
+		heading, body, _ := strings.Cut(table, "\n")
 
-			_, err := parser.Parse(input[1])
-			if err == nil {
-				t.Errorf("the page says %q is refused, and Parse accepts it", input[1])
+		dialect, ok := dialects[heading]
+		if !ok {
+			t.Errorf("docs/dialects.md has a refusals table for %q, a dialect this test does not know", heading)
 
-				continue
+			continue
+		}
+
+		for _, m := range row.FindAllStringSubmatch(body, -1) {
+			allowed := []string{"id", "name"}
+			if m[3] != "" {
+				allowed = nil
+				for _, f := range quoted.FindAllStringSubmatch(m[3], -1) {
+					allowed = append(allowed, f[1])
+				}
 			}
 
-			if !strings.Contains(err.Error(), m[2]) {
-				t.Errorf("the page says %q answers %q; Parse answers %q", input[1], m[2], err.Error())
+			parser := NewFilterParser(allowed, WithDialect(dialect))
+
+			for _, input := range code.FindAllStringSubmatch(m[1], -1) {
+				checked[heading]++
+
+				_, err := parser.Parse(input[1])
+				if err == nil {
+					t.Errorf("%s: the page says %q is refused, and Parse accepts it", heading, input[1])
+
+					continue
+				}
+
+				if !strings.Contains(err.Error(), m[2]) {
+					t.Errorf("%s: the page says %q answers %q; Parse answers %q", heading, input[1], m[2], err.Error())
+				}
 			}
 		}
 	}
 
-	if checked < 9 {
-		t.Fatalf("read %d inputs from the page's table, want at least 9: the table's shape changed and this test reads nothing", checked)
+	if checked["SQL:2023"] < 9 || checked["MySQL 8.4"] < 12 {
+		t.Fatalf("read %v inputs from the page's tables, want at least 9 for SQL:2023 and 12 for MySQL 8.4: the tables' shape changed and this test reads nothing", checked)
 	}
 }

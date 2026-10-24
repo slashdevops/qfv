@@ -59,13 +59,15 @@ func main() {
 
 - **Three validators** — fields selection, filtering, and sorting, each gated by
   an allow-list of fields (nested dot-notation like `user.profile.age` supported).
-- **PostgreSQL's filter grammar, or the SQL standard's** — comparison,
+- **The filter grammar of the database that runs it** — comparison,
   logical, `IN`, `BETWEEN [SYMMETRIC]`, `LIKE`/`ILIKE` with `ESCAPE`,
   `SIMILAR TO`, POSIX regex, `IS NULL`, `IS [NOT] TRUE/FALSE/UNKNOWN`, and
-  `IS [NOT] DISTINCT FROM`. The default dialect is PostgreSQL 18's;
-  `WithDialect(DialectSQLStandard)` accepts SQL:2023 (ISO/IEC 9075:2023) and
-  refuses PostgreSQL's own spellings. See [the SQL dialect](docs/dialects.md).
-- **Configurable** — choose the SQL dialect (PostgreSQL 18 or SQL:2023), and
+  `IS [NOT] DISTINCT FROM`, as PostgreSQL 18 runs them (the default), or as
+  SQL:2023 (ISO/IEC 9075:2023) or MySQL 8.4 does with `WithDialect`. MySQL's
+  dialect reads strings with MySQL's backslash escapes, so a filter cannot
+  hide a predicate from the allow-list. See [SQL Dialects](docs/dialects.md).
+- **Configurable** — choose the SQL dialect (PostgreSQL 18, SQL:2023 or
+  MySQL 8.4), and
   restrict which operators or sort directions are allowed.
 - **Returns an AST** you can walk or render, with precise, aggregated errors.
 - **Concurrency-safe** parsers.
@@ -88,7 +90,7 @@ flowchart LR
     AL(["Allow-list of fields"]) -. gates .-> FP
     AL -. gates .-> FI
     AL -. gates .-> SP
-    DI(["SQL dialect<br/>PostgreSQL 18 (default) · SQL:2023"]) -. grammar .-> FI
+    DI(["SQL dialect<br/>PostgreSQL 18 (default) · SQL:2023 · MySQL 8.4"]) -. grammar .-> FI
 
     FP --> FN["FieldsNode<br/>[]string"]
     FI --> AST["Filter AST<br/>(Node tree)"]
@@ -121,7 +123,7 @@ Full documentation lives in [`docs/`](docs/README.md):
 
 - [Getting Started](docs/getting-started.md) — install, update, complete example
 - [Filtering](docs/filtering.md) — the full operator/predicate reference
-- [SQL Dialects](docs/dialects.md) — PostgreSQL 18 (the default) or SQL:2023:
+- [SQL Dialects](docs/dialects.md) — PostgreSQL 18 (the default), SQL:2023 or MySQL 8.4:
   why a filter parser needs one, choosing it, and every construct in each
 - [Configuration](docs/configuration.md) — choose the dialect, restrict
   operators and sort directions

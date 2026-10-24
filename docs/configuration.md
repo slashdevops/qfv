@@ -8,8 +8,9 @@ time.
 ## The SQL dialect
 
 The filter parser checks a filter in the grammar of the SQL it will run as:
-PostgreSQL 18's by default, or the SQL standard's (SQL:2023) with
-`WithDialect`. Everything about it is on its own page, [SQL Dialects](dialects.md):
+PostgreSQL 18's by default, or, with `WithDialect`, the SQL standard's
+(SQL:2023) or MySQL 8.4's, whose strings are read with MySQL's backslash
+escapes. Everything about it is on its own page, [SQL Dialects](dialects.md):
 why there is one, how to choose it, how it is checked, a table of every
 construct in each, and what it does not do.
 
@@ -18,6 +19,11 @@ p := qfv.NewFilterParser(fields, qfv.WithDialect(qfv.DialectSQLStandard))
 
 p.Parse("id <> 1 AND name LIKE 'x!%' ESCAPE '!'") // ok
 p.Parse("id != 1")                                // error: != is not part of the SQL:2023 dialect: write <>
+
+m := qfv.NewFilterParser(fields, qfv.WithDialect(qfv.DialectMySQL))
+
+m.Parse(`id != 1 AND name = 'it\'s'`)           // ok: MySQL 8.4 runs it
+m.Parse("name ILIKE 'x%'")                        // error: operator "ILIKE" is not part of the MySQL 8.4 dialect
 ```
 
 The dialect comes before the allow-list below: an operator the dialect does not
