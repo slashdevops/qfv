@@ -59,9 +59,6 @@ func TestFilterParser_APatternIsAString(t *testing.T) {
 		// In the middle of an expression, and negated.
 		{name: "inside a group", input: "id = 1 AND (name LIKE 2 OR id = 3)"},
 		{name: "under NOT", input: "NOT name ILIKE 2"},
-		// The ESCAPE clause is not part of this grammar.
-		{name: "ESCAPE", input: "name LIKE 'x!%' ESCAPE '!'"},
-		{name: "SIMILAR TO with ESCAPE", input: "name SIMILAR TO 'x!%' ESCAPE '!'"},
 	}
 
 	for _, tt := range refused {
@@ -230,5 +227,133 @@ func TestFilterParser_YesAndNoAreNames(t *testing.T) {
 	// boolean's input, which is the caller's column to know.
 	if _, err := NewFilterParser(allowed).Parse("active = 'yes'"); err != nil {
 		t.Errorf(`active = 'yes': %v`, err)
+	}
+}
+
+// TestFilterParser_TheEscapeClause: PostgreSQL writes "string LIKE pattern
+// [ESCAPE escape-character]", and the same after SIMILAR TO. The clause was
+// not part of this grammar, and "name LIKE 'x!%' ESCAPE '!'" was refused.
+// Each row was run against PostgreSQL 18.6 on the table above, with the rows
+// ('x%') and ('xa'); what it answered is in the comment.
+func TestFilterParser_TheEscapeClause(t *testing.T) {
+	allowed := []string{"id", "name", "price", "active"}
+
+	accepted := []struct {
+		input  string
+		escape string
+		text   string // the node's String(), with the clause
+	}{
+		// 1: only the row 'x%'
+		{input: "name LIKE 'x!%' ESCAPE '!'", escape: "!", text: "(name LIKE 'x!%' ESCAPE '!')"},
+		{input: "name like 'x!%' escape '!'", escape: "!", text: "(name LIKE 'x!%' ESCAPE '!')"},
+		{input: "name ILIKE 'X!%' ESCAPE '!'", escape: "!", text: "(name ILIKE 'X!%' ESCAPE '!')"},
+		{input: "name NOT LIKE 'x!%' ESCAPE '!'", escape: "!", text: "(name NOT LIKE 'x!%' ESCAPE '!')"},
+		{input: "name NOT ILIKE 'X!%' ESCAPE '!'", escape: "!", text: "(name NOT ILIKE 'X!%' ESCAPE '!')"},
+		{input: "name SIMILAR TO 'x!%' ESCAPE '!'", escape: "!", text: "name SIMILAR TO 'x!%' ESCAPE '!'"},
+		{input: "name NOT SIMILAR TO 'x!%' ESCAPE '!'", escape: "!", text: "name NOT SIMILAR TO 'x!%' ESCAPE '!'"},
+		// 2: an empty escape string turns escaping off, and % matches both
+		{input: "name LIKE 'x%' ESCAPE ''", escape: "", text: "(name LIKE 'x%' ESCAPE '')"},
+		{input: "name SIMILAR TO 'x%' ESCAPE ''", escape: "", text: "name SIMILAR TO 'x%' ESCAPE ''"},
+		// 2: one character is one character, whatever its bytes
+		{input: "name LIKE 'x%' ESCAPE 'é'", escape: "é", text: "(name LIKE 'x%' ESCAPE 'é')"},
+	}
+
+	for _, tt := range accepted {
+		t.Run("accepted: "+tt.input, func(t *testing.T) {
+			node, err := NewFilterParser(allowed).Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q): %v", tt.input, err)
+			}
+
+			var escape Node
+
+			switch n := node.(type) {
+			case *BinaryOperatorNode:
+				escape = n.Escape
+			case *SimilarToNode:
+				escape = n.Escape
+			default:
+				t.Fatalf("Parse(%q) = %T, want a pattern node", tt.input, node)
+			}
+
+			literal, ok := escape.(*LiteralNode)
+			if !ok || literal.Kind != reflect.String || literal.Value != tt.escape {
+				t.Errorf("Parse(%q): the escape is %#v, want the string %q", tt.input, escape, tt.escape)
+			}
+
+			if got := node.String(); got != tt.text {
+				t.Errorf("Parse(%q).String() = %q, want %q", tt.input, got, tt.text)
+			}
+		})
+	}
+
+	// A clause between two predicates belongs to the pattern before it.
+	t.Run("accepted: in an expression", func(t *testing.T) {
+		node, err := NewFilterParser(allowed).Parse("name LIKE 'x!%' ESCAPE '!' AND id = 1") // 1
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if got, want := node.String(), "((name LIKE 'x!%' ESCAPE '!') AND (id = 1))"; got != want {
+			t.Errorf("String() = %q, want %q", got, want)
+		}
+	})
+
+	// Without the clause there is no escape: what every caller saw before.
+	for _, input := range []string{"name LIKE 'x%'", "name ~~ 'x%'", "name SIMILAR TO 'x%'"} {
+		t.Run("no clause: "+input, func(t *testing.T) {
+			node, err := NewFilterParser(allowed).Parse(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			switch n := node.(type) {
+			case *BinaryOperatorNode:
+				if n.Escape != nil {
+					t.Errorf("Escape = %v, want nil", n.Escape)
+				}
+			case *SimilarToNode:
+				if n.Escape != nil {
+					t.Errorf("Escape = %v, want nil", n.Escape)
+				}
+			}
+		})
+	}
+
+	refused := []struct {
+		input string
+		says  string
+	}{
+		// invalid escape string
+		{input: "name LIKE 'x%' ESCAPE '!!'", says: "must be empty or one character"},
+		{input: "name SIMILAR TO 'x%' ESCAPE 'ab'", says: "must be empty or one character"},
+		// function pg_catalog.like_escape(unknown, integer) does not exist
+		{input: "name LIKE 'x%' ESCAPE 1", says: "expected a string escape character after ESCAPE"},
+		// function pg_catalog.like_escape(unknown, boolean) does not exist
+		{input: "name LIKE 'x%' ESCAPE TRUE", says: "expected a string escape character after ESCAPE"},
+		// invalid escape string: a column's value, decided per row
+		{input: "name LIKE 'x%' ESCAPE name", says: "expected a string escape character after ESCAPE"},
+		// syntax error at or near "ESCAPE": the ~~ operators take no clause
+		{input: "name ~~ 'x!%' ESCAPE '!'", says: "not with the operator LIKE"},
+		{input: "name ~~* 'x!%' ESCAPE '!'", says: "not with the operator ILIKE"},
+		{input: "name !~~ 'x!%' ESCAPE '!'", says: "not with the operator NOT LIKE"},
+		{input: "name !~~* 'x!%' ESCAPE '!'", says: "not with the operator NOT ILIKE"},
+		// syntax error at or near ")": no escape character
+		{input: "name LIKE 'x%' ESCAPE", says: ""},
+		// syntax error at or near "ESCAPE": one clause
+		{input: "name LIKE 'x!%' ESCAPE '!' ESCAPE '!'", says: ""},
+	}
+
+	for _, tt := range refused {
+		t.Run("refused: "+tt.input, func(t *testing.T) {
+			node, err := NewFilterParser(allowed).Parse(tt.input)
+			if err == nil {
+				t.Fatalf("Parse(%q) = %v, want an error: PostgreSQL refuses it", tt.input, node)
+			}
+
+			if !strings.Contains(err.Error(), tt.says) {
+				t.Errorf("Parse(%q) = %q, want it to say %q", tt.input, err.Error(), tt.says)
+			}
+		})
 	}
 }

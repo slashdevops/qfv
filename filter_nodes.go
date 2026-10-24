@@ -40,7 +40,10 @@ type SimilarToNode struct {
 	baseNode
 	Field   Node
 	Pattern Node
-	IsNot   bool // true for NOT SIMILAR TO
+	// Escape is the ESCAPE clause's escape character, a string LiteralNode of
+	// zero or one character, or nil when there is no clause.
+	Escape Node
+	IsNot  bool // true for NOT SIMILAR TO
 }
 
 func (n *SimilarToNode) Type() NodeType {
@@ -51,9 +54,9 @@ func (n *SimilarToNode) Type() NodeType {
 }
 func (n *SimilarToNode) String() string {
 	if n.IsNot {
-		return fmt.Sprintf("%s NOT SIMILAR TO %s", n.Field.String(), n.Pattern.String())
+		return fmt.Sprintf("%s NOT SIMILAR TO %s%s", n.Field.String(), n.Pattern.String(), escapeClause(n.Escape))
 	}
-	return fmt.Sprintf("%s SIMILAR TO %s", n.Field.String(), n.Pattern.String())
+	return fmt.Sprintf("%s SIMILAR TO %s%s", n.Field.String(), n.Pattern.String(), escapeClause(n.Escape))
 }
 func (n *SimilarToNode) Pos() scanner.Position { return n.pos }
 
@@ -148,14 +151,29 @@ func (n *UnaryOperatorNode) Pos() scanner.Position { return n.pos }
 // BinaryOperatorNode represents a binary operation (AND, OR)
 type BinaryOperatorNode struct {
 	baseNode
-	Left     Node
-	Right    Node
+	Left  Node
+	Right Node
+	// Escape is the ESCAPE clause of LIKE, ILIKE and their negations, written
+	// with the keyword: a string LiteralNode of zero or one character, or nil
+	// when there is no clause. It is nil for every other operator, and for
+	// the ~~ operators, which take no clause.
+	Escape   Node
 	Operator TokenType
 }
 
 func (n *BinaryOperatorNode) Type() NodeType { return NodeTypeBinaryOperator }
 func (n *BinaryOperatorNode) String() string {
-	return fmt.Sprintf("(%s %s %s)", n.Left.String(), n.Operator, n.Right.String())
+	return fmt.Sprintf("(%s %s %s%s)", n.Left.String(), n.Operator, n.Right.String(), escapeClause(n.Escape))
+}
+
+// escapeClause is " ESCAPE <character>" for a pattern written with one, and
+// nothing for a pattern without.
+func escapeClause(escape Node) string {
+	if escape == nil {
+		return ""
+	}
+
+	return " ESCAPE " + escape.String()
 }
 func (n *BinaryOperatorNode) Pos() scanner.Position { return n.pos }
 
