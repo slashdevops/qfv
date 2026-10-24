@@ -25,7 +25,7 @@ flowchart TB
     allow -. gates .-> FilterParser
     allow -. gates .-> SortParser
 
-    dialect(["SQL dialect<br/>PostgreSQL (default) · SQL:2023"])
+    dialect(["SQL dialect<br/>PostgreSQL 18 (default) · SQL:2023"])
     dialect -. grammar .-> FilterParser
 ```
 

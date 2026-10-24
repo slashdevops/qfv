@@ -33,7 +33,7 @@ explicitly permit can appear in a query. This is the primary defense against
 invalid or malicious input reaching your database.
 
 The filter parser checks an expression in the grammar of the SQL it will run
-as, and does not translate it: **PostgreSQL's by default**, or the SQL
+as, and does not translate it: **PostgreSQL 18's by default**, or the SQL
 standard's with `WithDialect(qfv.DialectSQLStandard)`. See
 [the SQL dialect](configuration.md#the-sql-dialect).
 

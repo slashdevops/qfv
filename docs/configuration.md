@@ -1,6 +1,6 @@
 # Configuration
 
-By default the filter parser reads PostgreSQL's grammar and accepts every
+By default the filter parser reads PostgreSQL 18's grammar and accepts every
 operator, and the sort parser accepts both `ASC` and `DESC`. You can choose
 the SQL dialect, and narrow either, with functional options at construction
 time.
@@ -50,7 +50,8 @@ The dialect comes before the allow-list: an operator the dialect does not have
 is refused whether `WithAllowedOperators` allows it or not.
 
 A dialect is a value of the `Dialect` type, and the zero value is
-`DialectPostgreSQL`; there is no way to name one that does not exist.
+`DialectPostgreSQL`; there is no way to name one that does not exist. Each
+names its version: `String()` is `PostgreSQL 18` or `SQL:2023`.
 Another database's grammar (MySQL's, for instance: `REGEXP`, `<=>`,
 backslash escapes in strings) is a dialect to add, with its own tests run
 against that database.

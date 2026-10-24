@@ -14,8 +14,9 @@ package qfv
 // (https://www.postgresql.org/docs/current/features-sql-standard.html), and
 // against what its manual calls an extension.
 //
-// A Dialect is one of the values below; the zero value is DialectPostgreSQL,
-// the grammar this package has always parsed.
+// A Dialect is one of the values below, each a version of its SQL: PostgreSQL
+// 18, SQL:2023. The zero value is DialectPostgreSQL, the grammar this package
+// has always parsed.
 type Dialect struct {
 	name string
 }
@@ -27,7 +28,7 @@ var (
 	DialectPostgreSQL = Dialect{}
 
 	// DialectSQLStandard is the SQL standard, ISO/IEC 9075:2023 (SQL:2023),
-	// Part 2 (Foundation). It is PostgreSQL's grammar without what
+	// Part 2 (Foundation). It is PostgreSQL 18's grammar without what
 	// PostgreSQL's manual calls its own:
 	//
 	//   - != (the standard's "not equal" is <>);
@@ -50,10 +51,11 @@ var (
 	DialectSQLStandard = Dialect{name: "SQL:2023"}
 )
 
-// String is the dialect's name, as error messages write it.
+// String is the dialect's name with its version, as error messages write it:
+// "PostgreSQL 18", "SQL:2023".
 func (d Dialect) String() string {
 	if d.name == "" {
-		return "PostgreSQL"
+		return "PostgreSQL 18"
 	}
 
 	return d.name
