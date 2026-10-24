@@ -59,9 +59,12 @@ func main() {
 
 - **Three validators** — fields selection, filtering, and sorting, each gated by
   an allow-list of fields (nested dot-notation like `user.profile.age` supported).
-- **Rich, PostgreSQL-flavored filter grammar** — comparison, logical, `IN`,
-  `BETWEEN [SYMMETRIC]`, `LIKE`/`ILIKE`, `SIMILAR TO`, POSIX regex, `IS NULL`,
-  `IS [NOT] TRUE/FALSE/UNKNOWN`, and `IS [NOT] DISTINCT FROM`.
+- **PostgreSQL's filter grammar, or the SQL standard's** — comparison,
+  logical, `IN`, `BETWEEN [SYMMETRIC]`, `LIKE`/`ILIKE` with `ESCAPE`,
+  `SIMILAR TO`, POSIX regex, `IS NULL`, `IS [NOT] TRUE/FALSE/UNKNOWN`, and
+  `IS [NOT] DISTINCT FROM`. The default dialect is PostgreSQL 18's;
+  `WithDialect(DialectSQLStandard)` accepts SQL:2023 (ISO/IEC 9075:2023) and
+  refuses PostgreSQL's own spellings. See [the SQL dialect](docs/configuration.md#the-sql-dialect).
 - **Configurable** — restrict which operators or sort directions are allowed.
 - **Returns an AST** you can walk or render, with precise, aggregated errors.
 - **Concurrency-safe** parsers.
