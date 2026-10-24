@@ -65,7 +65,8 @@ func main() {
   `IS [NOT] DISTINCT FROM`. The default dialect is PostgreSQL 18's;
   `WithDialect(DialectSQLStandard)` accepts SQL:2023 (ISO/IEC 9075:2023) and
   refuses PostgreSQL's own spellings. See [the SQL dialect](docs/dialects.md).
-- **Configurable** — restrict which operators or sort directions are allowed.
+- **Configurable** — choose the SQL dialect (PostgreSQL 18 or SQL:2023), and
+  restrict which operators or sort directions are allowed.
 - **Returns an AST** you can walk or render, with precise, aggregated errors.
 - **Concurrency-safe** parsers.
 
@@ -87,6 +88,7 @@ flowchart LR
     AL(["Allow-list of fields"]) -. gates .-> FP
     AL -. gates .-> FI
     AL -. gates .-> SP
+    DI(["SQL dialect<br/>PostgreSQL 18 (default) · SQL:2023"]) -. grammar .-> FI
 
     FP --> FN["FieldsNode<br/>[]string"]
     FI --> AST["Filter AST<br/>(Node tree)"]
@@ -101,13 +103,14 @@ flowchart LR
 
 The filter parser is a hand-written recursive-descent parser: a `Lexer`
 tokenizes the input, then the parser builds the AST while honoring operator
-precedence (`OR` < `AND` < comparison) and the allow-list.
+precedence (`OR` < `AND` < comparison), the dialect and the allow-lists.
 
 ```mermaid
 flowchart LR
     IN["input string"] --> LEX["Lexer<br/>tokenize"]
     LEX --> TOK["[]Token"]
     TOK --> PAR["FilterParser<br/>recursive descent"]
+    CHK(["dialect · field and<br/>operator allow-lists"]) -. "each field and operator" .-> PAR
     PAR --> AST["AST root (Node)"]
     PAR -. "collects every error" .-> ERR["errors.Join(…)"]
 ```
@@ -118,7 +121,10 @@ Full documentation lives in [`docs/`](docs/README.md):
 
 - [Getting Started](docs/getting-started.md) — install, update, complete example
 - [Filtering](docs/filtering.md) — the full operator/predicate reference
-- [Configuration](docs/configuration.md) — restrict operators and sort directions
+- [SQL Dialects](docs/dialects.md) — PostgreSQL 18 (the default) or SQL:2023:
+  why a filter parser needs one, choosing it, and every construct in each
+- [Configuration](docs/configuration.md) — choose the dialect, restrict
+  operators and sort directions
 - [Error Handling](docs/error-handling.md) — inspecting validation failures
 - [Migration Guide](docs/migration.md) — upgrading between versions
 
@@ -127,4 +133,5 @@ API reference and runnable examples are on
 
 ## License
 
-See the repository for license details.
+QFV is licensed under the [Apache License, Version 2.0](LICENSE)
+([text](https://www.apache.org/licenses/LICENSE-2.0)).
