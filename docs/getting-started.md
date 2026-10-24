@@ -32,6 +32,11 @@ Every parser is built from an **allow-list of fields**, so only fields you
 explicitly permit can appear in a query. This is the primary defense against
 invalid or malicious input reaching your database.
 
+The filter parser checks an expression in the grammar of the SQL it will run
+as, and does not translate it: **PostgreSQL's by default**, or the SQL
+standard's with `WithDialect(qfv.DialectSQLStandard)`. See
+[the SQL dialect](configuration.md#the-sql-dialect).
+
 All three parsers are **safe for concurrent use** — build them once and share
 them across goroutines.
 
@@ -130,5 +135,5 @@ func main() {
 ## Next steps
 
 - [Filtering](filtering.md) — the full set of operators and predicates
-- [Configuration](configuration.md) — restrict operators and sort directions
+- [Configuration](configuration.md) — the SQL dialect, and restricting operators and sort directions
 - [Error Handling](error-handling.md) — inspecting validation failures

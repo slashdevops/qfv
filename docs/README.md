@@ -24,21 +24,24 @@ flowchart TB
     allow -. gates .-> FieldsParser
     allow -. gates .-> FilterParser
     allow -. gates .-> SortParser
+
+    dialect(["SQL dialect<br/>PostgreSQL (default) · SQL:2023"])
+    dialect -. grammar .-> FilterParser
 ```
 
 | Parser | Input example | Output | Complexity |
 | --- | --- | --- | --- |
 | `FieldsParser` | `first_name, email` | `FieldsNode` | comma-split validation |
 | `SortParser` | `first_name ASC, created_at DESC` | `SortNode` | comma-split + direction check |
-| `FilterParser` | `age >= 18 AND status IN ('active')` | AST (`Node`) | full recursive-descent grammar |
+| `FilterParser` | `age >= 18 AND status IN ('active')` | AST (`Node`) | full recursive-descent grammar, in PostgreSQL's dialect or the SQL standard's |
 
 ## Guides
 
 | Guide | What it covers |
 | --- | --- |
 | [Getting Started](getting-started.md) | Install, update, and a complete runnable example of the three parsers |
-| [Filtering](filtering.md) | The full filter grammar — every operator/predicate, dotted fields, and worked examples |
-| [Configuration](configuration.md) | Restricting which operators and sort directions are allowed |
+| [Filtering](filtering.md) | The full filter grammar — every operator/predicate, `ESCAPE`, dotted fields, and worked examples |
+| [Configuration](configuration.md) | The SQL dialect (PostgreSQL or the SQL standard), and restricting which operators and sort directions are allowed |
 | [Error Handling](error-handling.md) | Error shapes and how to inspect validation failures |
 | [Migration Guide](migration.md) | Breaking changes and how to upgrade between versions |
 

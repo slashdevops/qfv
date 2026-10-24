@@ -1,9 +1,13 @@
 # Filtering
 
-The filter parser validates complex boolean expressions and returns an AST. It
-implements a PostgreSQL-flavored grammar; see the PostgreSQL 18 references for
+The filter parser validates complex boolean expressions and returns an AST. Its
+grammar is PostgreSQL's by default; see the PostgreSQL 18 references for
+[SQL Syntax](https://www.postgresql.org/docs/18/sql-syntax.html),
 [Comparison Functions and Operators](https://www.postgresql.org/docs/18/functions-comparison.html)
 and [Pattern Matching](https://www.postgresql.org/docs/18/functions-matching.html).
+With `WithDialect(qfv.DialectSQLStandard)` it is the SQL standard's (ISO/IEC
+9075:2023), which this page's PostgreSQL extensions are not part of: see
+[the SQL dialect](configuration.md#the-sql-dialect).
 
 ```go
 filterParser := qfv.NewFilterParser(allowedFields)
@@ -20,8 +24,8 @@ The parser guarantees that:
 
 Parsing is a two-stage pipeline. The `Lexer` first turns the raw string into a
 flat list of tokens; the recursive-descent parser then consumes those tokens to
-build the AST, checking each field against the allow-list and each operator
-against the (optional) operator allow-list as it goes.
+build the AST, checking each field against the allow-list, and each operator
+against the dialect and then the (optional) operator allow-list, as it goes.
 
 ```mermaid
 flowchart LR
@@ -35,6 +39,7 @@ flowchart LR
     LEX --> tokens
     tokens --> PAR["parseExpression()"]
     PAR --> AST["AST root (Node)"]
+    DIA(["dialect · operator allow-list"]) -. "each operator" .-> PAR
     PAR -. "every problem collected" .-> ERR["errors.Join(…)"]
 ```
 
