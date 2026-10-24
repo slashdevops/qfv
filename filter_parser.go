@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"text/scanner"
+	"unicode/utf8"
 )
 
 type QFVFilterError struct {
@@ -302,20 +303,22 @@ func (p *filterParseState) parseComparison() Node {
 			return p.parseComparisonOperator(field)
 		case TokenOperatorLike:
 			p.requireOp(OpLike)
+			keyword := p.isKeyword("LIKE")
 			p.nextToken() // Consume LIKE (or ~~)
-			return p.parseLikeOperator(field, TokenOperatorLike)
+			return p.parseLikeOperator(field, TokenOperatorLike, keyword)
 		case TokenOperatorILike:
 			p.requireOp(OpILike)
+			keyword := p.isKeyword("ILIKE")
 			p.nextToken() // Consume ILIKE (or ~~*)
-			return p.parseLikeOperator(field, TokenOperatorILike)
+			return p.parseLikeOperator(field, TokenOperatorILike, keyword)
 		case TokenOperatorNotLike:
 			p.requireOp(OpLike)
 			p.nextToken() // Consume !~~ (operator form of NOT LIKE)
-			return p.parseLikeOperator(field, TokenOperatorNotLike)
+			return p.parseLikeOperator(field, TokenOperatorNotLike, false)
 		case TokenOperatorNotILike:
 			p.requireOp(OpILike)
 			p.nextToken() // Consume !~~* (operator form of NOT ILIKE)
-			return p.parseLikeOperator(field, TokenOperatorNotILike)
+			return p.parseLikeOperator(field, TokenOperatorNotILike, false)
 		case TokenOperatorIn:
 			p.requireOp(OpIn)
 			p.nextToken() // Consume IN
@@ -378,7 +381,7 @@ func (p *filterParseState) parseComparison() Node {
 
 				p.requireOp(OpLike)
 				p.nextToken() // Consume LIKE
-				return p.parseLikeOperator(field, TokenOperatorNotLike)
+				return p.parseLikeOperator(field, TokenOperatorNotLike, true)
 			case TokenOperatorILike:
 				if !p.isKeyword("ILIKE") {
 					return p.unexpectedAfterNot(field)
@@ -386,7 +389,7 @@ func (p *filterParseState) parseComparison() Node {
 
 				p.requireOp(OpILike)
 				p.nextToken() // Consume ILIKE
-				return p.parseLikeOperator(field, TokenOperatorNotILike)
+				return p.parseLikeOperator(field, TokenOperatorNotILike, true)
 			case TokenOperatorSimilarTo:
 				p.requireOp(OpSimilarTo)
 				p.nextToken() // Consume SIMILAR
@@ -439,6 +442,7 @@ func (p *filterParseState) parseSimilarToOperator(field Node, isNot bool) Node {
 		baseNode: baseNode{pos: pos},
 		Field:    field,
 		Pattern:  pattern,
+		Escape:   p.parseEscape(operator, true),
 		IsNot:    isNot,
 	}
 }
@@ -452,8 +456,7 @@ func (p *filterParseState) parseSimilarToOperator(field Node, isNot bool) Node {
 // type is, because no ~~ takes one. So a literal of another kind is refused
 // here, as it already was for the POSIX operators (~, ~*, !~, !~*).
 //
-// The ESCAPE clause is not part of this grammar: a pattern is written with
-// the default escape character, the backslash.
+// The ESCAPE clause that may follow it is read by parseEscape.
 func (p *filterParseState) parsePattern(operator TokenType) Node {
 	pattern := p.parsePrimary()
 
@@ -467,16 +470,60 @@ func (p *filterParseState) parsePattern(operator TokenType) Node {
 // parseLikeOperator parses a LIKE/ILIKE/NOT LIKE/NOT ILIKE operator.
 // Expects the current token to be the pattern after the operator was consumed.
 // operator is one of TokenOperatorLike, TokenOperatorILike, TokenOperatorNotLike,
-// or TokenOperatorNotILike.
-func (p *filterParseState) parseLikeOperator(field Node, operator TokenType) Node {
+// or TokenOperatorNotILike; keyword is whether it was written as a word
+// (LIKE, ILIKE) rather than as a ~~ operator, which takes no ESCAPE clause.
+func (p *filterParseState) parseLikeOperator(field Node, operator TokenType, keyword bool) Node {
 	pos := p.lexer.Current().Pos // Use position of the operator token (already consumed)
 	pattern := p.parsePattern(operator)
 	return &BinaryOperatorNode{
 		baseNode: baseNode{pos: pos},
 		Left:     field,
 		Right:    pattern,
+		Escape:   p.parseEscape(operator, keyword),
 		Operator: operator,
 	}
+}
+
+// parseEscape reads the ESCAPE clause after a pattern, and returns its
+// escape character, or nil when the pattern has no clause.
+//
+// PostgreSQL writes it "string LIKE pattern [ESCAPE escape-character]", and
+// the same after SIMILAR TO. What it refuses is refused here, so that a
+// filter the parser accepts is one PostgreSQL runs (each answer is from
+// PostgreSQL 18.6):
+//
+//   - after the ~~ operators ("syntax error at or near ESCAPE"): the clause
+//     belongs to the keyword spelling;
+//   - an escape character that is not a string literal: a number or a
+//     boolean has no like_escape, and a column's value is decided per row;
+//   - a string of more than one character ("invalid escape string").
+//
+// An empty string is a clause: it turns escaping off.
+func (p *filterParseState) parseEscape(operator TokenType, keyword bool) Node {
+	if p.currentToken.Type != TokenIdentifier || !p.isKeyword("ESCAPE") {
+		return nil
+	}
+
+	if !keyword {
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("ESCAPE follows a pattern written with LIKE, ILIKE or SIMILAR TO, not with the operator %s", operator)})
+	}
+
+	p.nextToken() // Consume ESCAPE
+
+	escape := p.parsePrimary()
+
+	literal, ok := escape.(*LiteralNode)
+	if !ok || literal.Kind != reflect.String {
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("expected a string escape character after ESCAPE, got %s", escape.Type())})
+
+		return escape
+	}
+
+	if text, _ := literal.Value.(string); utf8.RuneCountInString(text) > 1 {
+		p.addError(&QFVFilterError{Message: "the escape character after ESCAPE must be empty or one character"})
+	}
+
+	return escape
 }
 
 // parseInOperator parses IN operator

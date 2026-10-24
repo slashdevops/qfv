@@ -99,9 +99,15 @@ to.
   PostgreSQL has no `~~` that takes one, whatever the column's type is, and
   answers "operator does not exist". A number written as a string is a
   pattern: `name LIKE '1'`.
-- **The `ESCAPE` clause is not supported**; `name LIKE 'x!%' ESCAPE '!'` is
-  refused. A pattern is written with the default escape character, the
-  backslash, which a string literal keeps as it is: `name LIKE '100\%'`.
+- **The `ESCAPE` clause** follows `LIKE`, `ILIKE`, their negations and
+  `SIMILAR TO`, written with the keyword: `name LIKE 'x!%' ESCAPE '!'`. The
+  escape character is a string of one character, or empty to turn escaping
+  off (`ESCAPE ''`). PostgreSQL refuses the rest, and so does the parser:
+  two characters (`invalid escape string`), a number, a boolean or a column
+  as the escape, and the clause after `~~`, `~~*`, `!~~` and `!~~*`, which
+  take none. Without the clause the escape character is the backslash, which
+  a string literal keeps as it is: `name LIKE '100\%'`. The node carries it
+  as `Escape`, nil when there is no clause.
 - **What is in the pattern is not looked at**: see
   "Patterns are not compiled", under [AST nodes](#ast-nodes).
 
@@ -305,7 +311,14 @@ classDiagram
     class BinaryOperatorNode {
         +Left Node
         +Right Node
+        +Escape Node
         +Operator TokenType
+    }
+    class SimilarToNode {
+        +Field Node
+        +Pattern Node
+        +Escape Node
+        +IsNot bool
     }
     class InNode {
         +Field Node
@@ -331,7 +344,7 @@ Common concrete types:
 
 | Node | Produced by |
 | --- | --- |
-| `BinaryOperatorNode` | comparisons, `AND`/`OR`, `LIKE`/`ILIKE` |
+| `BinaryOperatorNode` | comparisons, `AND`/`OR`, `LIKE`/`ILIKE` (`Escape`) |
 | `UnaryOperatorNode` | a standalone leading `NOT` |
 | `GroupNode` | parenthesized expressions |
 | `InNode` | `IN` / `NOT IN` (`IsNot`) |
@@ -339,7 +352,7 @@ Common concrete types:
 | `IsNullNode` | `IS [NOT] NULL`, `ISNULL`/`NOTNULL` (`IsNot`) |
 | `BooleanTestNode` | `IS [NOT] TRUE/FALSE/UNKNOWN` (`Value`, `IsNot`) |
 | `DistinctNode` | `IS [NOT] DISTINCT FROM` (`Value`, `IsNot`) |
-| `SimilarToNode` | `SIMILAR TO` / `NOT SIMILAR TO` (`IsNot`) |
+| `SimilarToNode` | `SIMILAR TO` / `NOT SIMILAR TO` (`IsNot`, `Escape`) |
 | `RegexMatchNode` | `~ ~* !~ !~*` (`IsNot`, `IsCaseInsensitive`) |
 | `IdentifierNode` / `LiteralNode` | field names / literal values |
 

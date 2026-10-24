@@ -1,5 +1,37 @@
 # Migration Guide
 
+## v1.0.5 → v1.1.0
+
+The `ESCAPE` clause of the pattern operators, which PostgreSQL writes
+`string LIKE pattern [ESCAPE escape-character]` and the same after
+`SIMILAR TO`. Each row was run against PostgreSQL 18.6.
+
+**Accepted now, and refused before:**
+
+| Input | v1.0.5 | v1.1.0 | PostgreSQL 18 |
+| --- | --- | --- | --- |
+| `name LIKE 'x!%' ESCAPE '!'`, after `ILIKE`, `NOT LIKE`, `NOT ILIKE`, `SIMILAR TO` and `NOT SIMILAR TO` too, the keyword in any case | ❌ error | ✅ accepted | runs |
+| an empty escape: `name LIKE 'x%' ESCAPE ''` | ❌ error | ✅ accepted | runs, with escaping off |
+
+**Refused, as PostgreSQL refuses them:**
+
+| Input | v1.1.0 | PostgreSQL 18 |
+| --- | --- | --- |
+| two characters: `ESCAPE '!!'` | ❌ error: `must be empty or one character` | `invalid escape string` |
+| a number, a boolean or a column: `ESCAPE 1`, `ESCAPE TRUE`, `ESCAPE name` | ❌ error: `expected a string escape character after ESCAPE` | `function like_escape(unknown, integer) does not exist`; `invalid escape string` per row |
+| after the operator spellings: `name ~~ 'x!%' ESCAPE '!'`, and after `~~*`, `!~~`, `!~~*` | ❌ error: `ESCAPE follows a pattern written with LIKE, ILIKE or SIMILAR TO` | `syntax error at or near "ESCAPE"` |
+
+**For callers that walk the tree.** `BinaryOperatorNode` and `SimilarToNode`
+have a new field, `Escape`: the escape character, a string `LiteralNode`, or
+nil when there is no clause, which is every filter v1.0.5 accepted. Their
+`String()` writes the clause when there is one. Nothing else changes, so the
+version is a minor one.
+
+**For callers that hand the filter to PostgreSQL** as written: the clause
+goes with it and runs as the database runs it. A caller that prefixes field
+names in the text (`name` to `t.name`) leaves `ESCAPE` alone, since it is no
+field.
+
 ## v1.0.3 → v1.0.4
 
 Three places where the filter parser and PostgreSQL disagreed about an
