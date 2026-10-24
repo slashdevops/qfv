@@ -8,6 +8,7 @@ Follows these guidelines precisely to ensure consistency and maintainability of 
 - Language: Go (Go 1.22+)
 - Framework: Go standard library
 - Testing: Go's built-in testing package
+- Lint: golangci-lint, with the linters `.golangci.yaml` enables, in the pull request workflow
 - Dependency Management: Go modules
 - Version Control: Git
 - Documentation: go doc

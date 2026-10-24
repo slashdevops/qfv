@@ -87,6 +87,20 @@ jobs:
           scc --format html-table . | tee -a $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
+      - name: lint
+        run: |
+          echo "## Lint" >> $GITHUB_STEP_SUMMARY
+
+          # Pinned, as the coverage tool is: this module builds with the Go
+          # of its go.mod (1.26, GOTOOLCHAIN=local), and a golangci-lint
+          # whose go directive is newer does not install. v2.15.0 declares
+          # go 1.26.0. Raise it with the go directive. The linters it runs
+          # are .golangci.yaml's.
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+
+          golangci-lint run ./... | tee -a $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
       - name: test
         run: |
           echo "### Test report" >> $GITHUB_STEP_SUMMARY
