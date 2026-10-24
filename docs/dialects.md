@@ -114,11 +114,11 @@ flowchart TD
     IN["filter text"] --> LEX["Lexer: tokens<br/>(strings read as the dialect reads them)"]
     LEX --> OP["an operator, as written<br/>(e.g. !=, ILIKE, ~~, ISNULL)"]
     OP --> D1{"does the dialect have<br/>the operator?"}
-    D1 -->|"no: ILIKE, ~ in SQL:2023 and MySQL 8.4;<br/>SIMILAR TO, IS DISTINCT FROM in MySQL 8.4"| E1["operator &quot;ILIKE&quot; is not part of<br/>the SQL:2023 dialect"]
+    D1 -->|"no: ILIKE, ~ in SQL:2023 and MySQL 8.4;<br/>SIMILAR TO, IS DISTINCT FROM in MySQL 8.4"| E1["operator #quot;ILIKE#quot; is not part of<br/>the SQL:2023 dialect"]
     D1 -->|"yes"| D2{"does it have<br/>this spelling of it?"}
-    D2 -->|"no: != in SQL:2023; ~~ !~~ ISNULL NOTNULL<br/>in both; BETWEEN SYMMETRIC in MySQL 8.4"| E2["!= is not part of the SQL:2023<br/>dialect: write &lt;&gt;"]
+    D2 -->|"no: != in SQL:2023; ~~ !~~ ISNULL NOTNULL<br/>in both; BETWEEN SYMMETRIC in MySQL 8.4"| E2["!= is not part of the SQL:2023<br/>dialect: write #lt;#gt;"]
     D2 -->|"yes"| A{"allowed by<br/>WithAllowedOperators?"}
-    A -->|"no"| E3["operator &quot;LIKE&quot; is not allowed"]
+    A -->|"no"| E3["operator #quot;LIKE#quot; is not allowed"]
     A -->|"yes, or no allow-list"| OK["into the AST"]
     E1 --> J["errors.Join: every problem"]
     E2 --> J
