@@ -74,6 +74,13 @@ var (
 	// comment to the end of the line. With this dialect it is refused: id is
 	// not allowed, and # is not part of the grammar.
 	//
+	// MySQL reads a string in the connection's character set, and in gbk,
+	// gb18030, sjis, cp932 and big5 a backslash can be the last byte of a
+	// character that starts with any byte from 0x81: the server reads the two
+	// as one, and the backslash escapes nothing. So a backslash right after a
+	// character outside ASCII is refused, which no character set then reads
+	// differently.
+	//
 	// MySQL's sql_mode can turn backslash escapes off (NO_BACKSLASH_ESCAPES).
 	// The parser cannot see the server's mode: this dialect is MySQL 8.4's
 	// default, which has them on.

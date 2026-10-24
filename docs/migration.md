@@ -14,7 +14,15 @@ changes for a caller that does not pass it.
   `SIMILAR TO`, the `~` operators, `IS [NOT] DISTINCT FROM`,
   `BETWEEN SYMMETRIC`/`ASYMMETRIC`, `ISNULL`/`NOTNULL`. It keeps `!=` and an
   empty `ESCAPE`, which MySQL runs.
+- It refuses a backslash right after a character outside ASCII in a string,
+  which MySQL reads as part of that character in a multi-byte connection
+  character set (`gbk`, `sjis`): put an ASCII character between them.
 - `NewLexer` reads strings as before, as PostgreSQL does.
+- In every dialect, an `ESCAPE` string with a byte that is not UTF-8 in it is
+  refused, and in MySQL's, `ESCAPE '\%'` and `ESCAPE '\_'` are two characters,
+  as MySQL counts them.
+- A string's `LiteralNode.Value` is its text with one quote taken off each end.
+  It took every quote, so a string ending on an escaped quote lost it.
 - An `ESCAPE` string is measured in characters with its doubled quotes
   counted once in every dialect: an escape string of four single quotes is
   one quote, where it was counted as empty.
