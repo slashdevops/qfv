@@ -70,6 +70,26 @@ func ExampleFilterParser_postgres() {
 	// (((email ILIKE '%@EXAMPLE.com') AND age IS NOT DISTINCT FROM 30) OR active IS TRUE)
 }
 
+// ExampleWithDialect checks a filter in the SQL standard's grammar: the
+// standard's spellings are accepted, PostgreSQL's own are refused, and the
+// refusal names what the standard writes.
+func ExampleWithDialect() {
+	parser := qfv.NewFilterParser(allowed, qfv.WithDialect(qfv.DialectSQLStandard))
+
+	node, err := parser.Parse("age <> 30 AND email LIKE '%!_x' ESCAPE '!'")
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	fmt.Println(node.String())
+
+	_, err = parser.Parse("age != 30")
+	fmt.Println(err)
+	// Output:
+	// ((age <> 30) AND (email LIKE '%!_x' ESCAPE '!'))
+	// error: != is not part of the SQL:2023 dialect: write <>
+}
+
 // ExampleFilterParser_errorInspection shows how to inspect validation failures.
 // Parse aggregates every problem with errors.Join, so errors.As extracts the
 // first *QFVFilterError cause.

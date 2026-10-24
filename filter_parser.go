@@ -33,6 +33,8 @@ type FilterParser struct {
 	// allowedOps is the set of permitted operators. A nil map means every
 	// operator is allowed (the default).
 	allowedOps map[Operator]struct{}
+	// dialect is the SQL the filter is written in (WithDialect).
+	dialect Dialect
 }
 
 // NewFilterParser creates a new parser with the allowed fields. By default every
@@ -60,6 +62,7 @@ func NewFilterParser(allowedFields []string, opts ...FilterOption) *FilterParser
 type filterParseState struct {
 	allowedFields map[string]struct{}
 	allowedOps    map[Operator]struct{}
+	dialect       Dialect
 	lexer         *Lexer
 	currentToken  Token
 	errors        []error
@@ -72,6 +75,7 @@ func (p *FilterParser) Parse(input string) (Node, error) {
 	st := &filterParseState{
 		allowedFields: p.allowedFields,
 		allowedOps:    p.allowedOps,
+		dialect:       p.dialect,
 		lexer:         NewLexer(input),
 	}
 	st.lexer.Parse()
@@ -136,11 +140,25 @@ func (p *filterParseState) addError(err error) {
 // allow-list means every operator is permitted. Parsing continues either way so
 // that all problems are collected in a single pass.
 func (p *filterParseState) requireOp(op Operator) {
+	if !p.dialect.has(op) {
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("operator %q is not part of the %s dialect", op, p.dialect)})
+
+		return
+	}
+
 	if p.allowedOps == nil {
 		return
 	}
 	if _, ok := p.allowedOps[op]; !ok {
 		p.addError(&QFVFilterError{Message: fmt.Sprintf("operator %q is not allowed", op)})
+	}
+}
+
+// requireSpelling refuses a spelling of an operator the dialect does not
+// have, naming the one it does: PostgreSQL's != is the standard's <>.
+func (p *filterParseState) requireSpelling(spelling, standard string) {
+	if p.dialect.standard() {
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("%s is not part of the %s dialect: write %s", spelling, p.dialect, standard)})
 	}
 }
 
@@ -284,11 +302,13 @@ func (p *filterParseState) parseComparison() Node {
 			case "ISNULL":
 				pos := p.currentToken.Pos
 				p.requireOp(OpIsNull)
+				p.requireSpelling("ISNULL", "IS NULL")
 				p.nextToken()
 				return &IsNullNode{baseNode: baseNode{pos: pos}, Field: field, IsNot: false}
 			case "NOTNULL":
 				pos := p.currentToken.Pos
 				p.requireOp(OpIsNull)
+				p.requireSpelling("NOTNULL", "IS NOT NULL")
 				p.nextToken()
 				return &IsNullNode{baseNode: baseNode{pos: pos}, Field: field, IsNot: true}
 			}
@@ -300,10 +320,16 @@ func (p *filterParseState) parseComparison() Node {
 			TokenOperatorLessThan, TokenOperatorLessThanOrEqualTo,
 			TokenOperatorGreaterThan, TokenOperatorGreaterThanOrEqualTo:
 			p.requireOp(comparisonOperator(p.currentToken.Type))
+			if p.currentToken.Type == TokenOperatorNotEqualAlias {
+				p.requireSpelling("!=", "<>")
+			}
 			return p.parseComparisonOperator(field)
 		case TokenOperatorLike:
 			p.requireOp(OpLike)
 			keyword := p.isKeyword("LIKE")
+			if !keyword {
+				p.requireSpelling("~~", "LIKE")
+			}
 			p.nextToken() // Consume LIKE (or ~~)
 			return p.parseLikeOperator(field, TokenOperatorLike, keyword)
 		case TokenOperatorILike:
@@ -313,6 +339,7 @@ func (p *filterParseState) parseComparison() Node {
 			return p.parseLikeOperator(field, TokenOperatorILike, keyword)
 		case TokenOperatorNotLike:
 			p.requireOp(OpLike)
+			p.requireSpelling("!~~", "NOT LIKE")
 			p.nextToken() // Consume !~~ (operator form of NOT LIKE)
 			return p.parseLikeOperator(field, TokenOperatorNotLike, false)
 		case TokenOperatorNotILike:
@@ -519,8 +546,15 @@ func (p *filterParseState) parseEscape(operator TokenType, keyword bool) Node {
 		return escape
 	}
 
-	if text, _ := literal.Value.(string); utf8.RuneCountInString(text) > 1 {
+	text, _ := literal.Value.(string)
+
+	switch length := utf8.RuneCountInString(text); {
+	case length > 1:
 		p.addError(&QFVFilterError{Message: "the escape character after ESCAPE must be empty or one character"})
+	case length == 0 && p.dialect.standard():
+		// PostgreSQL's manual: "a zero-length ESCAPE value is disallowed"
+		// by the SQL standard.
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("an empty ESCAPE is not part of the %s dialect: the escape character is one character", p.dialect)})
 	}
 
 	return escape
