@@ -41,7 +41,8 @@ flowchart TB
 | --- | --- |
 | [Getting Started](getting-started.md) | Install, update, and a complete runnable example of the three parsers |
 | [Filtering](filtering.md) | The full filter grammar — every operator/predicate, `ESCAPE`, dotted fields, and worked examples |
-| [Configuration](configuration.md) | The SQL dialect (PostgreSQL or the SQL standard), and restricting which operators and sort directions are allowed |
+| [SQL Dialects](dialects.md) | PostgreSQL 18 (the default) or SQL:2023: why a filter parser needs one, choosing it, how a filter is checked, every construct in each |
+| [Configuration](configuration.md) | Choosing the dialect, and restricting which operators and sort directions are allowed |
 | [Error Handling](error-handling.md) | Error shapes and how to inspect validation failures |
 | [Migration Guide](migration.md) | Breaking changes and how to upgrade between versions |
 

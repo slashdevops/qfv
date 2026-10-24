@@ -6,6 +6,10 @@
 each dialect names its version, as `DialectSQLStandard`'s `SQL:2023` does.
 Only a caller that compares the string changes; the grammar does not.
 
+The dialects have a page of their own, [SQL Dialects](dialects.md): why a
+filter parser needs one, how to choose it, how a filter is checked against
+it, and every construct in each.
+
 ## v1.0.5 → v1.1.0
 
 Two additions: the SQL dialect a filter is written in, and the `ESCAPE`
@@ -19,7 +23,7 @@ with `ESCAPE` accepted.
 `DialectSQLStandard`, ISO/IEC 9075:2023, which refuses PostgreSQL's own
 spellings (`!=`, `ILIKE`, the `~~` and `~` operators, `ISNULL`/`NOTNULL`, an
 empty `ESCAPE`). The table is in
-[configuration.md](configuration.md#the-sql-dialect). Nothing changes
+[dialects.md](dialects.md). Nothing changes
 without the option.
 
 ### The `ESCAPE` clause

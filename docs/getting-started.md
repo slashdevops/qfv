@@ -35,7 +35,7 @@ invalid or malicious input reaching your database.
 The filter parser checks an expression in the grammar of the SQL it will run
 as, and does not translate it: **PostgreSQL 18's by default**, or the SQL
 standard's with `WithDialect(qfv.DialectSQLStandard)`. See
-[the SQL dialect](configuration.md#the-sql-dialect).
+[the SQL dialect](dialects.md).
 
 All three parsers are **safe for concurrent use** — build them once and share
 them across goroutines.
@@ -135,5 +135,6 @@ func main() {
 ## Next steps
 
 - [Filtering](filtering.md) — the full set of operators and predicates
+- [SQL Dialects](dialects.md) — PostgreSQL 18 or SQL:2023, and what each accepts
 - [Configuration](configuration.md) — the SQL dialect, and restricting operators and sort directions
 - [Error Handling](error-handling.md) — inspecting validation failures

@@ -7,7 +7,7 @@ grammar is PostgreSQL's by default; see the PostgreSQL 18 references for
 and [Pattern Matching](https://www.postgresql.org/docs/18/functions-matching.html).
 With `WithDialect(qfv.DialectSQLStandard)` it is the SQL standard's (ISO/IEC
 9075:2023), which this page's PostgreSQL extensions are not part of: see
-[the SQL dialect](configuration.md#the-sql-dialect).
+[the SQL dialect](dialects.md).
 
 ```go
 filterParser := qfv.NewFilterParser(allowedFields)

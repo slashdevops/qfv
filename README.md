@@ -64,7 +64,7 @@ func main() {
   `SIMILAR TO`, POSIX regex, `IS NULL`, `IS [NOT] TRUE/FALSE/UNKNOWN`, and
   `IS [NOT] DISTINCT FROM`. The default dialect is PostgreSQL 18's;
   `WithDialect(DialectSQLStandard)` accepts SQL:2023 (ISO/IEC 9075:2023) and
-  refuses PostgreSQL's own spellings. See [the SQL dialect](docs/configuration.md#the-sql-dialect).
+  refuses PostgreSQL's own spellings. See [the SQL dialect](docs/dialects.md).
 - **Configurable** — restrict which operators or sort directions are allowed.
 - **Returns an AST** you can walk or render, with precise, aggregated errors.
 - **Concurrency-safe** parsers.
