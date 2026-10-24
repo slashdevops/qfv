@@ -8,7 +8,7 @@
 // PostgreSQL 18 runs it; with WithDialect(DialectSQLStandard), the SQL
 // standard's (ISO/IEC 9075:2023), which refuses PostgreSQL's own spellings
 // such as != and ILIKE. WithAllowedOperators and WithAllowedOperatorGroups
-// narrow the operators further.
+// narrow the operators further. docs/dialects.md explains the dialects.
 //
 // Every parser is safe for concurrent use. The documentation, with the full
 // grammar, is in the repository's docs directory.

@@ -92,7 +92,7 @@ The filter parser rejects, among others:
 - unknown fields (not in the allow-list),
 - disallowed operators (see [Configuration](configuration.md)),
 - operators and spellings the dialect does not have (`!=` or `ILIKE` in the
-  SQL standard's; see [the SQL dialect](configuration.md#the-sql-dialect)),
+  SQL standard's; see [the SQL dialect](dialects.md)),
 - a pattern that is not a string, and an `ESCAPE` that is not a string of
   one character (empty is PostgreSQL's only),
 - trailing or incomplete input — the **entire** string must form one expression
