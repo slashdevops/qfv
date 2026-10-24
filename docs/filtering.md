@@ -273,7 +273,7 @@ parses into this tree (precedence makes `AND` the root, with the parenthesized
 graph TD
     AND["BinaryOperatorNode<br/>AND"]
     AND --> GRP["GroupNode<br/>( … )"]
-    AND --> GT["BinaryOperatorNode<br/>&gt;"]
+    AND --> GT["BinaryOperatorNode<br/>#gt;"]
 
     GRP --> OR["BinaryOperatorNode<br/>OR"]
     OR --> EQ1["BinaryOperatorNode<br/>="]

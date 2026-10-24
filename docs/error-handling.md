@@ -60,7 +60,7 @@ flowchart TD
     P --> CONS{"entire input<br/>consumed?"}
     CONS -->|"no"| ADD["add 'unexpected token' error"]
     CONS -->|"yes"| Q
-    ADD --> Q{"len(errors) &gt; 0?"}
+    ADD --> Q{"len(errors) #gt; 0?"}
     Q -->|"yes"| J["return errors.Join(…)<br/>of *QFVFilterError"]
     Q -->|"no"| OK["return AST, nil"]
 ```
