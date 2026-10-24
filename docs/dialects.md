@@ -77,6 +77,29 @@ MySQL's `sql_mode` can turn backslash escapes off (`NO_BACKSLASH_ESCAPES`). The
 parser cannot see the server's mode: `DialectMySQL` is MySQL 8.4's default,
 which has them on.
 
+### And in every connection character set
+
+MySQL reads a string in the connection's character set. In `gbk`, `gb18030`,
+`sjis`, `cp932` and `big5`, a backslash (byte 0x5C) can be the last byte of a
+character that starts with any byte from 0x81. The server then reads the byte
+before the backslash and the backslash as one character, and the backslash
+escapes nothing. `name = '丁\' OR id = 2 #'` is one comparison of `name` to
+this parser's reading, and with `SET NAMES gbk` MySQL 8.4.13 ran `id = 2`; with
+`utf8mb4` it did not.
+
+So `DialectMySQL` refuses a backslash right after a character outside ASCII
+(every such character ends in a byte from 0x80 in UTF-8, and so does every
+byte that is not UTF-8). A quote (0x27) is never part of a character in any of
+these sets, so nothing else can be read differently. Put a space or another
+ASCII character between them: `name = '丁 \'x'`.
+
+This was checked by running 6,000 filters the dialect accepts, written from
+quotes, backslashes, comments and multi-byte and invalid bytes, through MySQL
+8.4.13 under `utf8mb4`, `latin1`, `gbk`, `gb18030`, `sjis`, `cp932` and
+`big5`. None was read as anything but what the parser read: no syntax error,
+and no unknown column. Before this rule, `gbk` read 115 of them differently
+and `sjis` 49.
+
 ## Choosing a dialect
 
 ```mermaid
@@ -219,6 +242,8 @@ with any other problem in the same filter (see
 | `name ~ '^x'` | `operator "~" is not part of the MySQL 8.4 dialect` |
 | `id IS DISTINCT FROM 1` | `operator "IS DISTINCT FROM" is not part of the MySQL 8.4 dialect` |
 | `name = '\'' OR id > 0 #'` | `error on field 'id': field not allowed` (with the allow-list `["name"]`) |
+| `name = '丁\' OR id = 2 #'` | `illegal string: a backslash right after a character outside ASCII` |
+| `name LIKE 'x%' ESCAPE '\%'`, `name LIKE 'x%' ESCAPE '\_'` | `the escape character after ESCAPE must be empty or one character` |
 
 ## What a dialect does not do
 
@@ -230,15 +255,21 @@ with any other problem in the same filter (see
 - **It does not see the server's settings.** `DialectMySQL` is MySQL 8.4's
   default `sql_mode`. A server with `NO_BACKSLASH_ESCAPES` reads strings as
   PostgreSQL does, and `ANSI_QUOTES` or `PIPES_AS_CONCAT` change the grammar
-  further.
+  further. The connection's character set cannot change what a filter means
+  (see above), but it can make MySQL refuse one: an escape character outside
+  ASCII, such as `ESCAPE 'é'`, is two characters under `latin1` or `sjis`, and a
+  literal the column's collation cannot compare is an "Illegal mix of
+  collations".
 - **It does not change what a pattern means.** Without `ESCAPE`, PostgreSQL
   18's and MySQL 8.4's escape character is the backslash, and SQL:2023 has
   none, so `name LIKE '100\%'` matches `100%` on PostgreSQL 18 and MySQL 8.4,
   and `100\` followed by anything under the standard. The parser cannot see
   which you meant, so write an `ESCAPE` clause when it matters.
-- **It is stricter than the database in places, never looser.** MySQL 8.4
-  takes `ESCAPE 1` and strings in double quotes. The parser refuses both,
-  in every dialect.
+- **It is stricter than the database in places.** MySQL 8.4 takes `ESCAPE 1`,
+  strings in double quotes, and a backslash after a character outside ASCII
+  under `utf8mb4`. The parser refuses all three. It is looser only where the
+  database's answer depends on the connection, as above: never in what a
+  filter runs as.
 - **It does not apply to sorting or field selection.** The sort parser reads
   `field [ASC|DESC]` and the fields parser reads a list of names. Both are the
   same in every SQL, so they take no dialect.

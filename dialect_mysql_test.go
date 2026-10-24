@@ -172,3 +172,106 @@ func TestADoubledQuoteIsOneEscapeCharacter(t *testing.T) {
 		}
 	}
 }
+
+// TestNoConnectionCharacterSetReadsAStringDifferently: MySQL reads a string
+// in the connection's character set, and in gbk, gb18030, sjis, cp932 and
+// big5 a backslash (0x5C) can be the last byte of a character that starts
+// with any byte from 0x81. With SET NAMES gbk, MySQL 8.4.13 answered 1 row
+// for the first filter below: it read the bytes of 丁 and the backslash as
+// characters, the backslash escaped nothing, and id = 2 ran. With utf8mb4 it
+// answered 0. A backslash right after a character outside ASCII is refused.
+func TestNoConnectionCharacterSetReadsAStringDifferently(t *testing.T) {
+	t.Parallel()
+
+	parser := NewFilterParser([]string{"name"}, WithDialect(DialectMySQL))
+
+	for _, input := range []string{
+		`name = '丁\' OR id = 2 #'`,     // gbk, gb18030, sjis, cp932: 1 row, on id
+		"name = '\xbf\\' OR id > 0 #'", // gbk, gb18030: every row
+		"name = '\xc3\\' OR id > 0 #'", // gbk, gb18030: every row
+		`name = 'é\\'`,                 // the same rule for \\
+		`name = '\丁\'x'`,               // after an escaped character too
+	} {
+		_, err := parser.Parse(input)
+		if err == nil {
+			t.Errorf("Parse(%q) accepted: a multi-byte connection character set reads the backslash as part of the character before it", input)
+
+			continue
+		}
+
+		if !strings.Contains(err.Error(), "a backslash right after a character outside ASCII") {
+			t.Errorf("Parse(%q) = %q, want it to say why", input, err.Error())
+		}
+	}
+
+	// An ASCII character between them reads the same in every character set.
+	for _, input := range []string{`name = '丁 \'x'`, `name = '丁'`, `name = 'é'`, `name = 'a\'丁'`} {
+		if _, err := parser.Parse(input); err != nil {
+			t.Errorf("Parse(%q): %v", input, err)
+		}
+	}
+
+	// PostgreSQL's strings have no backslash escapes, and nothing to refuse.
+	if _, err := NewFilterParser([]string{"name"}).Parse(`name = '丁\'`); err != nil {
+		t.Errorf("PostgreSQL 18's dialect: %v", err)
+	}
+}
+
+// What MySQL 8.4 refuses of an ESCAPE string, the parser refuses: \% and \_
+// are two characters outside a pattern ("Incorrect arguments to ESCAPE"; \x
+// is one, and ran), and a byte that is not UTF-8 is no character (the same
+// error, with a utf8mb4 connection).
+func TestTheMySQLEscapeCharacterIsOneCharacterToMySQL(t *testing.T) {
+	t.Parallel()
+
+	parser := NewFilterParser([]string{"name"}, WithDialect(DialectMySQL))
+
+	for input, says := range map[string]string{
+		`name LIKE 'x%' ESCAPE '\%'`:     "must be empty or one character",
+		`name LIKE 'x%' ESCAPE '\_'`:     "must be empty or one character",
+		"name LIKE 'x%' ESCAPE '\xc3'":   "not valid UTF-8",
+		"name LIKE 'x%' ESCAPE '\\\xff'": "not valid UTF-8",
+	} {
+		_, err := parser.Parse(input)
+		if err == nil || !strings.Contains(err.Error(), says) {
+			t.Errorf("Parse(%q) = %v, want it to say %q", input, err, says)
+		}
+	}
+
+	for _, input := range []string{`name LIKE 'x%' ESCAPE '\x'`, "name LIKE 'x%' ESCAPE '�'"} {
+		if _, err := parser.Parse(input); err != nil {
+			t.Errorf("Parse(%q): %v", input, err)
+		}
+	}
+
+	// Not UTF-8 is refused in PostgreSQL's dialect too: PostgreSQL refuses
+	// the statement's encoding.
+	if _, err := NewFilterParser([]string{"name"}).Parse("name LIKE 'x%' ESCAPE '\xc3'"); err == nil {
+		t.Error("PostgreSQL 18's dialect accepted an escape that is not UTF-8")
+	}
+}
+
+// A string's Value is its text with one quote off each end: Trim took every
+// quote, and a string that ends on an escaped quote lost it.
+func TestAStringsValueKeepsItsLastQuote(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		dialect Dialect
+		input   string
+		value   string
+	}{
+		{DialectMySQL, `name = 'a\''`, `a\'`},
+		{DialectPostgreSQL, `name = ''''`, `''`},
+		{DialectPostgreSQL, `name = 'it''s'`, `it''s`},
+	} {
+		node, err := NewFilterParser([]string{"name"}, WithDialect(tt.dialect)).Parse(tt.input)
+		if err != nil {
+			t.Fatalf("%s: Parse(%q): %v", tt.dialect, tt.input, err)
+		}
+
+		if got := node.(*BinaryOperatorNode).Right.(*LiteralNode).Value; got != tt.value {
+			t.Errorf("%s: Parse(%q): Value = %q, want %q", tt.dialect, tt.input, got, tt.value)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"text/scanner"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Lexer breaks the input string into tokens
@@ -13,6 +14,13 @@ type Lexer struct {
 	inputLen int
 	pos      int
 	tokens   []Token
+	// reasons says why a token is illegal, by its index in tokens, where
+	// "illegal token" would not tell the caller what to write instead.
+	reasons map[int]string
+	// notUTF8 holds the byte offset of every string that had a byte which is
+	// not UTF-8 in it. The scanner reads such a byte as U+FFFD, so the
+	// string's text no longer shows it.
+	notUTF8 map[int]bool
 	// backslashEscapes is whether a backslash in a string escapes the
 	// character after it (MySQL 8.4's default), or is a character like any
 	// other (PostgreSQL 18, the SQL standard).
@@ -40,7 +48,7 @@ func newLexer(input string, dialect Dialect) *Lexer {
 		return ch == '_' || unicode.IsLetter(ch) || (i > 0 && (unicode.IsDigit(ch) || ch == '.'))
 	}
 
-	l := &Lexer{s: s, input: input, pos: -1, backslashEscapes: dialect.backslashEscapes()} // Start at -1, first Next moves to 0
+	l := &Lexer{s: s, input: input, pos: -1, reasons: map[int]string{}, notUTF8: map[int]bool{}, backslashEscapes: dialect.backslashEscapes()} // Start at -1, first Next moves to 0
 	l.inputLen = len(input)
 
 	return l
@@ -141,18 +149,35 @@ func (l *Lexer) Parse() {
 		case '\'': // Start of a single-quoted string literal
 			var sb strings.Builder
 			isValid := true
+			previous := rune(0)
 			for {
-				char := l.s.Next() // Consume next character
+				char := l.nextInString(pos)
 
 				if char == scanner.EOF {
 					// Reached EOF without closing quote
 					isValid = false
 					break // Exit loop
+				} else if char == '\\' && l.backslashEscapes && previous >= utf8.RuneSelf {
+					// MySQL reads a string in the connection's character
+					// set, and in gbk, gb18030, sjis, cp932 and big5 the
+					// backslash (0x5C) can be the last byte of a character
+					// that starts with any byte from 0x81: the server reads
+					// the two as one character, and the backslash escapes
+					// nothing. 'X\' OR id > 0 #' is then a string that ends
+					// where this lexer reads an escaped quote. A backslash
+					// right after a byte outside ASCII, which every
+					// non-ASCII character ends with in UTF-8 and every
+					// invalid byte is, is refused, so that no connection
+					// character set reads the string differently. A quote
+					// (0x27) is never part of a character in any of them.
+					l.reasons[len(l.tokens)] = "a backslash right after a character outside ASCII, which MySQL reads as part of that character in a multi-byte connection character set (gbk, sjis): put a space or another ASCII character between them"
+					isValid = false
+					break
 				} else if char == '\\' && l.backslashEscapes {
 					// MySQL 8.4: the backslash escapes the character after
 					// it, a quote included, and both are kept as written. A
 					// string that ends on its backslash is not closed.
-					escaped := l.s.Next()
+					escaped := l.nextInString(pos)
 					if escaped == scanner.EOF {
 						isValid = false
 						break
@@ -160,6 +185,9 @@ func (l *Lexer) Parse() {
 
 					_, _ = sb.WriteRune(char)
 					_, _ = sb.WriteRune(escaped)
+					previous = escaped
+
+					continue
 				} else if char == '\'' {
 					// Found a quote. Is it an escaped quote ('') or the end?
 					if l.s.Peek() == '\'' {
@@ -178,6 +206,8 @@ func (l *Lexer) Parse() {
 					// Note: Standard Go escapes like \n are not handled here, only '' for quote escape.
 					_, _ = sb.WriteRune(char)
 				}
+
+				previous = char
 			}
 
 			if isValid {
@@ -397,4 +427,22 @@ func (l *Lexer) Current() Token {
 	}
 
 	return l.tokens[l.pos]
+}
+
+// nextInString reads the next character of the string that starts at start,
+// and notes the string when the character is a byte that is not UTF-8. The
+// scanner reads such a byte as U+FFFD; the input says which it was, since
+// U+FFFD itself is the three bytes EF BF BD before the scanner's position.
+// (The scanner's ErrorCount cannot tell: it decodes one character ahead, and
+// counts the error during the call before.)
+func (l *Lexer) nextInString(start scanner.Position) rune {
+	char := l.s.Next()
+
+	if char == utf8.RuneError {
+		if end := l.s.Pos().Offset; end < 3 || l.input[end-3:end] != string(utf8.RuneError) {
+			l.notUTF8[start.Offset] = true
+		}
+	}
+
+	return char
 }

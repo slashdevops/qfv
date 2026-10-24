@@ -80,10 +80,18 @@ func (p *FilterParser) Parse(input string) (Node, error) {
 	st.lexer.Parse()
 
 	// Check for illegal tokens in the input
-	for _, token := range st.lexer.tokens {
-		if token.Type == TokenIllegal {
-			st.addError(&QFVFilterError{Field: token.Value, Message: "illegal token"})
+	for i, token := range st.lexer.tokens {
+		if token.Type != TokenIllegal {
+			continue
 		}
+
+		if reason, ok := st.lexer.reasons[i]; ok {
+			st.addError(&QFVFilterError{Message: "illegal string: " + reason})
+
+			continue
+		}
+
+		st.addError(&QFVFilterError{Field: token.Value, Message: "illegal token"})
 	}
 
 	st.nextToken()
@@ -545,6 +553,15 @@ func (p *filterParseState) parseEscape(operator TokenType, keyword bool) Node {
 		return escape
 	}
 
+	// A byte that is not UTF-8 counts as one character here, and is none to
+	// the database: MySQL 8.4 answers "Incorrect arguments to ESCAPE", and
+	// PostgreSQL refuses the statement's encoding.
+	if p.lexer.notUTF8[literal.Pos().Offset] {
+		p.addError(&QFVFilterError{Message: "the escape character after ESCAPE is not valid UTF-8"})
+
+		return escape
+	}
+
 	switch length := literalLength(literal.Text, p.dialect.backslashEscapes()); {
 	case length > 1:
 		p.addError(&QFVFilterError{Message: "the escape character after ESCAPE must be empty or one character"})
@@ -735,9 +752,11 @@ func (p *filterParseState) parsePrimary() Node {
 	case TokenString:
 		node := &LiteralNode{
 			baseNode: baseNode{pos: p.currentToken.Pos},
-			Value:    strings.Trim(p.currentToken.Value, "'"),
-			Kind:     reflect.String,
-			Text:     p.currentToken.Value,
+			// One quote off each end, and only one: Trim took every quote,
+			// and 'a\'' (MySQL's a') or '''' (one quote) lost the last.
+			Value: strings.TrimSuffix(strings.TrimPrefix(p.currentToken.Value, "'"), "'"),
+			Kind:  reflect.String,
+			Text:  p.currentToken.Value,
 		}
 		p.nextToken()
 		return node
@@ -809,7 +828,12 @@ func literalLength(text string, backslashEscapes bool) int {
 		case runes[i] == '\'' && i+1 < len(runes) && runes[i+1] == '\'':
 			i++
 		case backslashEscapes && runes[i] == '\\' && i+1 < len(runes):
-			i++
+			// MySQL keeps \% and \_ as two characters outside a pattern
+			// ("they are interpreted as literal \% and \_"), and refuses
+			// ESCAPE '\%' with "Incorrect arguments to ESCAPE".
+			if runes[i+1] != '%' && runes[i+1] != '_' {
+				i++
+			}
 		}
 
 		length++
