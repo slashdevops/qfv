@@ -90,6 +90,27 @@ func ExampleWithDialect() {
 	// error: != is not part of the SQL:2023 dialect: write <>
 }
 
+// ExampleWithDialect_mySQL checks filters in MySQL 8.4's grammar. Its strings
+// are read as MySQL reads them, with backslash escapes, so the second filter
+// is refused: MySQL runs it with a predicate on a field the allow-list does
+// not have, which a parser reading strings as PostgreSQL does would miss.
+func ExampleWithDialect_mySQL() {
+	parser := qfv.NewFilterParser([]string{"name"}, qfv.WithDialect(qfv.DialectMySQL))
+
+	node, err := parser.Parse(`name = 'it\'s' AND name != 'x'`)
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	fmt.Println(node.String())
+
+	_, err = parser.Parse(`name = '\'' OR id > 0 #'`)
+	fmt.Println(err != nil)
+	// Output:
+	// ((name = 'it\'s') AND (name != 'x'))
+	// true
+}
+
 // ExampleFilterParser_errorInspection shows how to inspect validation failures.
 // Parse aggregates every problem with errors.Join, so errors.As extracts the
 // first *QFVFilterError cause.

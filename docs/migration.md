@@ -1,5 +1,27 @@
 # Migration Guide
 
+## v1.1.1 → v1.2.0
+
+**`DialectMySQL`**: MySQL 8.4's grammar, with its default `sql_mode`. Nothing
+changes for a caller that does not pass it.
+
+- **It reads strings as MySQL does**, with backslash escapes. A parser that
+  reads them as PostgreSQL does, in front of MySQL, accepted
+  `name = '\'' OR id > 0 #'` as one comparison of `name` with a string, and
+  MySQL 8.4 runs it with a predicate on `id`, outside the allow-list. **If
+  your filters run on MySQL, pass `WithDialect(qfv.DialectMySQL)`.**
+- It refuses what MySQL 8.4 does not run: `ILIKE`, the `~~` operators,
+  `SIMILAR TO`, the `~` operators, `IS [NOT] DISTINCT FROM`,
+  `BETWEEN SYMMETRIC`/`ASYMMETRIC`, `ISNULL`/`NOTNULL`. It keeps `!=` and an
+  empty `ESCAPE`, which MySQL runs.
+- `NewLexer` reads strings as before, as PostgreSQL does.
+- An `ESCAPE` string is measured in characters with its doubled quotes
+  counted once in every dialect: an escape string of four single quotes is
+  one quote, where it was counted as empty.
+
+Every row is in [SQL Dialects](dialects.md), each one run against MySQL
+8.4.13.
+
 ## v1.1.0 → v1.1.1
 
 `DialectPostgreSQL.String()` is `PostgreSQL 18`, where it was `PostgreSQL`:

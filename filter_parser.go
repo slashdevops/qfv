@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"text/scanner"
-	"unicode/utf8"
 )
 
 type QFVFilterError struct {
@@ -76,7 +75,7 @@ func (p *FilterParser) Parse(input string) (Node, error) {
 		allowedFields: p.allowedFields,
 		allowedOps:    p.allowedOps,
 		dialect:       p.dialect,
-		lexer:         NewLexer(input),
+		lexer:         newLexer(input, p.dialect),
 	}
 	st.lexer.Parse()
 
@@ -156,9 +155,9 @@ func (p *filterParseState) requireOp(op Operator) {
 
 // requireSpelling refuses a spelling of an operator the dialect does not
 // have, naming the one it does: PostgreSQL's != is the standard's <>.
-func (p *filterParseState) requireSpelling(spelling, standard string) {
-	if p.dialect.standard() {
-		p.addError(&QFVFilterError{Message: fmt.Sprintf("%s is not part of the %s dialect: write %s", spelling, p.dialect, standard)})
+func (p *filterParseState) requireSpelling(spelling, instead string) {
+	if !p.dialect.hasSpelling(spelling) {
+		p.addError(&QFVFilterError{Message: fmt.Sprintf("%s is not part of the %s dialect: write %s", spelling, p.dialect, instead)})
 	}
 }
 
@@ -546,12 +545,10 @@ func (p *filterParseState) parseEscape(operator TokenType, keyword bool) Node {
 		return escape
 	}
 
-	text, _ := literal.Value.(string)
-
-	switch length := utf8.RuneCountInString(text); {
+	switch length := literalLength(literal.Text, p.dialect.backslashEscapes()); {
 	case length > 1:
 		p.addError(&QFVFilterError{Message: "the escape character after ESCAPE must be empty or one character"})
-	case length == 0 && p.dialect.standard():
+	case length == 0 && !p.dialect.emptyEscape():
 		// PostgreSQL's manual: "a zero-length ESCAPE value is disallowed"
 		// by the SQL standard.
 		p.addError(&QFVFilterError{Message: fmt.Sprintf("an empty ESCAPE is not part of the %s dialect: the escape character is one character", p.dialect)})
@@ -610,8 +607,10 @@ func (p *filterParseState) parseBetweenOperator(field Node, isNot bool) Node {
 		switch asciiUpper(p.currentToken.Value) {
 		case "SYMMETRIC":
 			isSymmetric = true
+			p.requireSpelling("BETWEEN SYMMETRIC", "BETWEEN, the lower bound first")
 			p.nextToken()
 		case "ASYMMETRIC":
+			p.requireSpelling("BETWEEN ASYMMETRIC", "BETWEEN")
 			p.nextToken()
 		}
 	}
@@ -793,4 +792,28 @@ func (p *filterParseState) parsePrimary() Node {
 			Text:     "",
 		}
 	}
+}
+
+// literalLength is how many characters the string literal written as text
+// holds: its quotes taken off, a doubled quote counted once, and, where a
+// backslash escapes the character after it, the two counted once. It is how
+// the escape character after ESCAPE is held to one: MySQL's ESCAPE '\\' is
+// one backslash, and an ESCAPE string of four single quotes is one quote in
+// every dialect.
+func literalLength(text string, backslashEscapes bool) int {
+	runes := []rune(strings.TrimSuffix(strings.TrimPrefix(text, "'"), "'"))
+	length := 0
+
+	for i := 0; i < len(runes); i++ {
+		switch {
+		case runes[i] == '\'' && i+1 < len(runes) && runes[i+1] == '\'':
+			i++
+		case backslashEscapes && runes[i] == '\\' && i+1 < len(runes):
+			i++
+		}
+
+		length++
+	}
+
+	return length
 }

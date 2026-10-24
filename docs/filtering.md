@@ -5,9 +5,9 @@ grammar is PostgreSQL's by default; see the PostgreSQL 18 references for
 [SQL Syntax](https://www.postgresql.org/docs/18/sql-syntax.html),
 [Comparison Functions and Operators](https://www.postgresql.org/docs/18/functions-comparison.html)
 and [Pattern Matching](https://www.postgresql.org/docs/18/functions-matching.html).
-With `WithDialect(qfv.DialectSQLStandard)` it is the SQL standard's (ISO/IEC
-9075:2023), which this page's PostgreSQL extensions are not part of: see
-[the SQL dialect](dialects.md).
+With `WithDialect` it is the SQL standard's (ISO/IEC 9075:2023) or MySQL
+8.4's, and neither has all of this page's PostgreSQL extensions: see
+[SQL Dialects](dialects.md), which also has what each one accepts.
 
 ```go
 filterParser := qfv.NewFilterParser(allowedFields)
