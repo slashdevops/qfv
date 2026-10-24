@@ -4,7 +4,7 @@
 //
 // The filter parser reads an SQL boolean expression and returns its AST. It
 // checks an expression and does not translate one, so what it accepts is
-// what the SQL it will run as accepts: by default PostgreSQL's grammar, as
+// what the SQL it will run as accepts: by default PostgreSQL 18's grammar, as
 // PostgreSQL 18 runs it; with WithDialect(DialectSQLStandard), the SQL
 // standard's (ISO/IEC 9075:2023), which refuses PostgreSQL's own spellings
 // such as != and ILIKE. WithAllowedOperators and WithAllowedOperatorGroups

@@ -1,15 +1,21 @@
 # Migration Guide
 
+## v1.1.0 → v1.1.1
+
+`DialectPostgreSQL.String()` is `PostgreSQL 18`, where it was `PostgreSQL`:
+each dialect names its version, as `DialectSQLStandard`'s `SQL:2023` does.
+Only a caller that compares the string changes; the grammar does not.
+
 ## v1.0.5 → v1.1.0
 
 Two additions: the SQL dialect a filter is written in, and the `ESCAPE`
-clause. A caller that changes nothing gets PostgreSQL's grammar, as before,
+clause. A caller that changes nothing gets PostgreSQL 18's grammar, as before,
 with `ESCAPE` accepted.
 
 ### The SQL dialect
 
 `WithDialect` chooses the grammar a filter is checked in:
-`DialectPostgreSQL`, the default and what every earlier version parsed, or
+`DialectPostgreSQL` (PostgreSQL 18), the default and what every earlier version parsed, or
 `DialectSQLStandard`, ISO/IEC 9075:2023, which refuses PostgreSQL's own
 spellings (`!=`, `ILIKE`, the `~~` and `~` operators, `ISNULL`/`NOTNULL`, an
 empty `ESCAPE`). The table is in

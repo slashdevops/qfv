@@ -55,8 +55,8 @@ func TestTheDefaultDialectIsPostgreSQL(t *testing.T) {
 	t.Parallel()
 
 	var zero Dialect
-	if zero != DialectPostgreSQL || zero.String() != "PostgreSQL" {
-		t.Errorf("the zero Dialect is %q, want PostgreSQL", zero)
+	if zero != DialectPostgreSQL || zero.String() != "PostgreSQL 18" {
+		t.Errorf("the zero Dialect is %q, want PostgreSQL 18", zero)
 	}
 
 	if got := DialectPostgreSQL.Operators(); !slices.Equal(got, AllOperators()) {
@@ -73,7 +73,7 @@ func TestTheDefaultDialectIsPostgreSQL(t *testing.T) {
 	} {
 		for _, tt := range postgresOnly {
 			if _, err := parser.Parse(tt.input); err != nil {
-				t.Errorf("Parse(%q): %v, want it accepted in PostgreSQL", tt.input, err)
+				t.Errorf("Parse(%q): %v, want it accepted in PostgreSQL 18", tt.input, err)
 			}
 		}
 	}
